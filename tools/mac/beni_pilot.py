@@ -117,53 +117,23 @@ class RLDrive:
         self.v = 0.0
 
     def step(self, u, dt):
-        v, sgn = self.v, (1.0 if self.v > 0 else -1.0)
-        if u * sgn < -0.001 and abs(v) > self.MIN_V:              # opposing input: brake, send 0
+        """Returns the command. Gas in the direction of motion passes through (Beni shapes it).
+        Input opposing motion: the command IS the velocity estimate, so it decays smoothly at the brake
+        rate to zero and then eases into reverse along the throttle curve u*(1550-|v|) -- no steps."""
+        v = self.v
+        sgn = 1.0 if v > 0 else (-1.0 if v < 0 else 0.0)
+        if sgn != 0.0 and u * sgn < -0.001 and abs(v) > self.MIN_V:     # opposing: brake along the curve
             nv = v - sgn * self.BRAKE * dt
-            self.v = 0.0 if nv * sgn < 0 else nv
-            return 0.0
-        if abs(u) < self.THRESH:                                   # coast
-            if abs(v) > self.MIN_V:
-                nv = v - sgn * self.COAST * dt
-                self.v = 0.0 if nv * sgn < 0 else nv
-            else:
-                self.v = 0.0
+            self.v = 0.0 if nv * sgn <= 0 else nv
+            return self.v / self.VMAX
+        if abs(u) < self.THRESH:                                          # coast
+            nv = v - sgn * self.COAST * dt
+            self.v = 0.0 if (sgn == 0.0 or nv * sgn <= 0) else nv
             return 0.0
         self.v = max(-self.VMAX, min(self.VMAX, v + u * max(0.0, self.FORCE - abs(v)) * dt))
+        if u < 0 and self.v <= 0:                                         # reversing: follow the curve in
+            return max(u, self.v / self.VMAX)
         return u
-
-
-class LookController:
-    """Right stick -> head, plus R3 look lock.
-    - Unlocked: StickYaw (tilt-only wedge at 12:00/6:00, yaw elsewhere, no tilt while turning).
-    - toggle(): R3. Locking freezes yaw at the head's current aim (works mid-turn with the stick held).
-    - Locked: right stick up/down still tilts. The lock arms for unlatching once the stick has been
-      released or sits in the up/down wedge; after that, the next sideways push unlatches it and
-      normal yaw takes over from that push."""
-    def __init__(self):
-        self.yaw = StickYaw()
-        self.locked, self.armed, self.lock_h = False, False, 0.0
-        self.last = (0.0, 0.0)
-
-    def toggle(self):
-        self.locked = not self.locked
-        self.armed, self.lock_h = False, self.last[0]
-
-    def step(self, rx, ry, expo):
-        import math
-        if self.locked:
-            mag = math.hypot(rx, ry)
-            sideways = mag >= DEADZONE and not self.yaw._in_wedge(math.degrees(math.atan2(rx, -ry)))
-            if not sideways:
-                self.armed = True
-            elif self.armed:
-                self.locked = False
-                self.yaw = StickYaw()          # fresh gesture: yaw follows this push
-        if self.locked:
-            self.last = (self.lock_h, -head_curve(ry, expo))
-        else:
-            self.last = self.yaw.step(rx, ry, expo)
-        return self.last
 
 
 def raw(v):
