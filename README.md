@@ -22,7 +22,7 @@ wlan0 is failover only: `beni-wifi-watchdog.timer` (60 s) brings up home Wi-Fi o
 Order matters: Beni serves one UCP peer at a time.
 1. Stand Beni with the remote. The phone must not be on Beni's Wi-Fi (Beni serves one peer).
 2. On the Pi, run `sudo bash /opt/beni/beni_start.sh`. It prints the tunnel URL. The bridge takes over the app's session.
-3. On the Mac, run `tools/mac/beni_pilot.py <url>`. Hold R1 to arm; Circle is the e-stop.
+3. On the Mac, run `tools/mac/beni_lan.sh` (LAN path via SSH forward: p50 21 ms; preferred). From off-LAN, use `tools/mac/beni_pilot.py <url>` through the tunnel (p50 115 ms). Hold R1 to arm; Circle is the e-stop.
 4. Stop with `curl <url>/stop`.
 
 ## Live video only
