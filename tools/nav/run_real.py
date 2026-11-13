@@ -24,13 +24,17 @@ ap.add_argument("--sim-tilt-max", type=float, default=math.radians(45), help="be
 ap.add_argument("--max-seconds", type=float, default=150)
 ap.add_argument("--standing", action="store_true", help="Beni is standing (policy running). Default: sitting = "
                 "disabled: no driving, head checked before a reduced, monitored sweep")
+ap.add_argument("--stand", action="store_true", help="stand Beni up first, as the app does: ch5 816 (4 s) -> 801 (3 s) -> 546")
+ap.add_argument("--sit", action="store_true", help="issue the sit command first, as the app does: ch5 554 (1.1 s) -> 562 "
+                "(held); the head position is only known after it")
 ap.add_argument("--scan-only", action="store_true", help="head-sweep scan and map, then stop (no driving)")
 ap.add_argument("--keep", help="URL of a bridge to hold open unarmed (keeps the root bridge and its Wi-Fi alive)")
 a = ap.parse_args()
 
 tour = RgbBoxTour(a.hfov, a.cam_h, a.vmax, spin=a.spin, turn_max=a.turn_max)
-tour.sitting = not a.standing
-tour.sweep_amp = 1.0 if a.standing else 0.6
+standing = a.standing or a.stand
+tour.sitting = not standing
+tour.sweep_amp = 1.0 if standing else 0.6
 link = BridgeLink(a.url)
 twin = TwinPublisher()
 os.makedirs(os.path.join(HERE, "..", "..", "captures", "nav"), exist_ok=True)
@@ -99,6 +103,30 @@ if a.keep:
     keep = Shared(0.0)
     keep.ctl["arm"] = False
     threading.Thread(target=ws_thread, args=(keep, a.keep), daemon=True).start()
+if a.sit:
+    print("sit command: ch5 554 -> 562", flush=True)
+    for ch5, secs in ((554, 1.1), (562, 2.5)):
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            with link.sh.lock:
+                link.sh.ctl["ch5"] = ch5
+            link.drive(0, 0)
+            twin.state([1000, 1000, 1000, 2015, 32, ch5], (0, 0, 0), (0, 0, a.cam_h, 0, 0, 0), tour.per.hfov, "sit")
+            time.sleep(1 / 30)
+    print("sit command sent; ch5 held at 562", flush=True)
+if a.stand:
+    print("standing up: ch5 816 -> 801 -> 546", flush=True)
+    ts = time.monotonic()
+    for ch5, secs in ((816, 4.0), (801, 3.0), (546, 2.0)):
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            with link.sh.lock:
+                link.sh.ctl["ch5"] = ch5
+            link.drive(0, 0)
+            twin.state([1000, 1000, 1000, 2015, 32, ch5], (0, 0, 0), (0, 0, a.cam_h, 0, 0, 0), tour.per.hfov,
+                       "sit" if ch5 != 546 else "stand")
+            time.sleep(1 / 30)
+    print(f"stand sequence sent ({time.monotonic() - ts:.0f} s)", flush=True)
 t0 = last = time.monotonic()
 lastp = ""
 try:
@@ -112,8 +140,9 @@ try:
             link.sh.ctl["v"] = a.tilt
         # the sim gets the measured camera pitch (not the tilt command) in ch3's tilt bits
         sim_tilt = max(0, min(62, round(31 + tour.per.pitch / a.sim_tilt_max * 31)))
-        twin.state([1000 + thr * 999, 1000 + yc * 999, 1000 + tour.head * 999, 1984 | sim_tilt, 32, 546],
-                   (tour.x, tour.y, tour.yaw), cam_pose(), tour.per.hfov, "stand" if a.standing else "sit")
+        twin.state([1000 + thr * 999, 1000 + yc * 999, 1000 + tour.head * 999, 1984 | sim_tilt, 32,
+                    562 if a.sit else 546],
+                   (tour.x, tour.y, tour.yaw), cam_pose(), tour.per.hfov, "stand" if standing else "sit")
         if int(now * 2) != int((now - 1 / 30) * 2):
             twin.marks(tour.order if tour.order else [m for m in tour.marks if m[3] >= 3])
         s = tour.status()

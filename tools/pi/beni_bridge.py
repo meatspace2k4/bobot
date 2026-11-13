@@ -108,6 +108,12 @@ class State:
                 log(f"action {a}: {self.action_note}")
             if "cap" in m:
                 self.cap = max(0.0, min(float(m["cap"]), self.max_cap))
+            if m.get("ch5") is not None:   # live ch5 (posture: the app stands Beni with 816 -> 801 -> 545)
+                global CH5
+                v = int(m["ch5"]) & 0x7FF
+                if v != CH5:
+                    log(f"ch5 {CH5} -> {v}")
+                CH5 = v
             if m.get("estop"):
                 if not self.estop:
                     log("E-STOP latched")
