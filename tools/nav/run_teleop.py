@@ -29,6 +29,7 @@ ap.add_argument("--vmax", type=float, default=1.0, help="m/s at full throttle (d
 ap.add_argument("--tilt", type=float, default=-0.3)
 ap.add_argument("--sim-tilt-max", type=float, default=math.radians(45))
 ap.add_argument("--no-hold", action="store_true")
+ap.add_argument("--standing", action="store_true", help="Beni is standing; default sitting (disabled, no hold, sim sits)")
 ap.add_argument("--hold-yaw-db", type=float, default=3.0, help="deg")
 ap.add_argument("--hold-dist-db", type=float, default=0.03, help="m")
 ap.add_argument("--hold-max", type=float, default=0.15, help="max corrective stick")
@@ -101,7 +102,7 @@ try:
             m = "sim"
         else:
             m = "idle"
-        if not ctl or now - idle_since > 0.5:
+        if a.standing and (not ctl or now - idle_since > 0.5):
             # drift hold: reference taken once idle; corrective sticks inside the deadbands are zero
             if ref is None:
                 ref = (yaw, Z)
@@ -126,7 +127,8 @@ try:
         S["y"] += thr * a.vmax * dt * math.sin(yaw)
         sim_tilt = max(0, min(62, round(31 + pitch / a.sim_tilt_max * 31)))
         twin.state([1000 + thr * 999, 1000 + yc * 999, 1000 + head * 999, 1984 | sim_tilt, last_ch4, 546],
-                   (S["x"], S["y"], yaw), (S["x"], S["y"], a.cam_h, yaw, pitch, roll), per.hfov)
+                   (S["x"], S["y"], yaw), (S["x"], S["y"], a.cam_h, yaw, pitch, roll), per.hfov,
+                   "stand" if a.standing else "sit")
         time.sleep(1 / 30)
 except KeyboardInterrupt:
     pass

@@ -65,6 +65,9 @@ class RgbBoxTour:
         self.per = Perception(hfov, cam_h)
         self.vmax, self.spin, self.merge, self.turn_max = vmax, spin, merge, turn_max
         self.sweep_s = 24.0
+        self.sitting = False        # Beni disabled (sitting): never drive; scan only after the head check
+        self.sweep_amp = 1.0        # head stick amplitude of the sweep (0.6 when sitting)
+        self.deg_per_unit = 168.0   # camera pan per unit head stick (head-sweep flow)
         self.lock = threading.Lock()
         self.reset()
 
@@ -80,6 +83,9 @@ class RgbBoxTour:
             self.marks = []           # [x, y, half, count]
             self.phase, self.turned = "settle", 0.0
             self.head, self.t_survey = 0.0, 0.0
+            self.t_phase, self.burst_t0, self.burst_y0, self.bursts = 0.0, 0.0, 0.0, []
+            self.stall_t, self.abort = 0.0, ""
+            self._k, self._cmd = -1, 0.0
             self.t = 0.0
             self.order, self.i, self.hold = [], 0, 0.0
             self.dist = 0.0
@@ -95,6 +101,9 @@ class RgbBoxTour:
             self.yaw += dyaw
             self.P = P
             self.seen = detections(P, self.per)
+            if self.phase == "wiggle":
+                self.turned += dyaw
+                return
             if self.phase == "survey":
                 # body still, head sweeping: flow yaw is the camera's pan relative to the body
                 self.turned += dyaw
@@ -126,12 +135,46 @@ class RgbBoxTour:
             thr = yc = 0.0
             if self.phase == "settle":
                 if self.t > 1.5 and self.P is not None:
-                    self.phase, self.turned, self.t_survey = "survey", 0.0, self.t
+                    self.phase, self.t_phase, self.head = "center", self.t, 0.0
+            elif self.phase == "center":
+                # head to centre and let it settle before anything moves it
+                self.head = 0.0
+                if self.t - self.t_phase > 1.5:
+                    self.phase, self.t_phase, self.turned, self.bursts = "wiggle", self.t, 0.0, []
+            elif self.phase == "wiggle":
+                # short bursts either side of centre; each must turn the camera by a fair share of what was
+                # commanded, else the head is mis-positioned (against a limit or the legs): no scan
+                W, B = 0.08, 0.45
+                seq = (W, 0.0, -W, 0.0, W, 0.0)
+                k = int((self.t - self.t_phase) / B)
+                if k < len(seq):
+                    self.head = seq[k]
+                    if k != self._k:
+                        if self._k >= 0:
+                            self.bursts.append((self._cmd, math.degrees(self.turned - self.burst_y0)))
+                        self._k, self._cmd, self.burst_y0 = k, self.head, self.turned
+                else:
+                    self.head = 0.0
+                    moves = [(c, dy) for c, dy in self.bursts if c != 0.0]
+                    exp = W * self.deg_per_unit
+                    ok = len(moves) >= 2 and all(abs(dy) > 0.5 * exp and (dy > 0) == (c > 0) for c, dy in moves)
+                    if ok:
+                        self.phase, self.turned, self.t_survey = "survey", 0.0, self.t
+                    else:
+                        self.abort = "head check failed: " + ", ".join(f"{c:+.2f}->{dy:+.0f}deg" for c, dy in moves)
+                        self.phase = "done"
             elif self.phase == "survey":
                 # head sweep: centre -> full left -> full right -> centre, body held still
                 T, u = self.sweep_s, (self.t - self.t_survey) / self.sweep_s
-                self.head = -4 * u if u < 0.25 else (-1 + 4 * (u - 0.25) if u < 0.75 else 1 - 4 * (u - 0.75))
-                self.head = max(-1.0, min(1.0, self.head))
+                A = self.sweep_amp
+                self.head = A * (-4 * u if u < 0.25 else (-1 + 4 * (u - 0.25) if u < 0.75 else 1 - 4 * (u - 0.75)))
+                self.head = max(-A, min(A, self.head))
+                # the camera must follow the command: a stalled head (limit, legs) ends the sweep at once
+                lag = abs(self.head * self.deg_per_unit - math.degrees(self.turned))
+                self.stall_t = self.stall_t + dt if lag > 35 else 0.0
+                if self.stall_t > 0.5:
+                    self.abort = f"sweep stopped: head {self.head:+.2f} but camera {math.degrees(self.turned):+.0f} deg"
+                    u = 1.0
                 if u >= 1.0:
                     self.head = 0.0
                     self.marks = []
@@ -141,7 +184,7 @@ class RgbBoxTour:
                     good = sorted([m for m in self.marks if m[3] >= 8 and math.hypot(m[0], m[1]) < 2.5], key=lambda m: -m[3])[:6]
                     key = lambda m: (math.atan2(m[1] - self.y, m[0] - self.x) - self.yaw) % (2 * math.pi)
                     self.order = sorted(good, key=key)
-                    self.phase, self.i = "tour", 0
+                    self.phase, self.i = ("done" if self.sitting else "tour"), 0
             elif self.phase == "tour":
                 if self.i >= len(self.order):
                     self.phase = "done"
@@ -204,6 +247,8 @@ class RgbBoxTour:
     def status(self):
         with self.lock:
             s = f"{self.phase}  pose ({self.x:+.2f},{self.y:+.2f}) yaw {math.degrees(self.yaw):+.0f}"
+            if self.abort:
+                s += "  " + self.abort
             if self.phase == "survey":
                 s += f"  head {self.head:+.2f}  camera pan {math.degrees(self.turned):+.0f}  detections {len(self.raw)}"
             elif self.phase in ("tour", "done"):

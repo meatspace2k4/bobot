@@ -454,6 +454,7 @@ def run(a, ui):
                 show_boxes(m, box_geoms, isinstance(src, BoxTour))
                 TwinSource.hide(m, d)
                 v.user_scn.ngeom = 0
+                sim.sit = False
                 src.start(sim)
             last_ch4, acc = 32, 0.
             if overlay:

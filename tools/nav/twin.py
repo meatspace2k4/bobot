@@ -72,9 +72,11 @@ class TwinPublisher:
         except queue.Full:
             pass
 
-    def state(self, ch, pose, cam, hfov):
+    def state(self, ch, pose, cam, hfov, posture="stand"):
+        """posture: "sit" (disabled, legs folded, no policy) or "stand"."""
         self.send({"type": "state", "t": time.time(), "ch": [int(c) for c in ch],
-                   "pose": [float(v) for v in pose], "cam": [float(v) for v in cam], "hfov": float(hfov)})
+                   "pose": [float(v) for v in pose], "cam": [float(v) for v in cam], "hfov": float(hfov),
+                   "posture": posture})
 
     def frame(self, rgb, w=320, h=240):
         small = cv2.resize(rgb, (w, h), interpolation=cv2.INTER_AREA)
@@ -99,6 +101,7 @@ class TwinServer:
         self.state_t = 0.0
         self.frame = None          # RGB uint8 HxWx3
         self.frame_new = False
+        self.frame_t = -1e9        # when the last camera frame arrived
         self.marks = []
         self.path = []
         self.points = []           # list of (xyz Nx3, rgb Nx3)
@@ -148,6 +151,7 @@ class TwinServer:
                 img = cv2.imdecode(buf, cv2.IMREAD_COLOR)
                 if img is not None:
                     self.frame, self.frame_new = cv2.cvtColor(img, cv2.COLOR_BGR2RGB), True
+                    self.frame_t = time.monotonic()
             elif t == "marks":
                 self.marks = m["marks"]
             elif t == "points":

@@ -30,6 +30,9 @@ ACTION_JOINTS = ["L1", "R1", "L2", "R2", "LW", "RW", "head_yaw_joint"]
 OBS_JOINTS = ["L1", "R1", "head_yaw_joint", "L2", "R2", "LW", "RW"]
 DEFAULT_Q = {"L1": 0.3, "R1": 0.3, "L2": 0.5, "R2": 0.5, "LW": 0.0, "RW": 0.0,
              "head_yaw_joint": 0.0}
+# Sitting (Beni's disabled state): legs swung all the way back and folded, wheels up, no policy.
+# Joint ranges from open-beni assets/beni_base/mjcf/beni.xml: L1/R1 -2.5307..6.8940, L2/R2 -0.7854..1.1345.
+SIT_Q = {"L1": -2.5307 + 0.05, "R1": -2.5307 + 0.05, "L2": 1.1345 - 0.03, "R2": 1.1345 - 0.03, "LW": 0.0, "RW": 0.0}
 SCALE = {"L1": .25, "R1": .25, "L2": .25, "R2": .25, "LW": 20.0, "RW": 20.0, "head_yaw_joint": .5}
 # open-beni python/beni_rl/beni_robot.py actuator config
 MOTOR = {
@@ -157,6 +160,7 @@ class Sim:
         self.rig = self.m.body_mocapid[mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_BODY, "chase_rig")]
         pol = Path(a.policy).expanduser() if a.policy else Path(a.open_beni).expanduser() / "assets/models/policy.onnx"
         self.head_override = True
+        self.sit = False          # True: Beni's sitting / disabled state (no policy, legs folded)
         self.pol = ort.InferenceSession(str(pol), providers=["CPUExecutionProvider"])
         self.reset()
 
@@ -204,8 +208,12 @@ class Sim:
             vx_cmd, wz_cmd = self.jump_hold, 0.
         self.vx += max(-.03, min(.03, vx_cmd - self.vx))
         self.wz += max(-.06, min(.06, wz_cmd - self.wz))
-        act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw)[None], "h_in": self.h})
-        act = act[0].astype(np.float32)
+        if self.sit:
+            # disabled: no policy; joints held at the folded pose (action = offset from the default / scale)
+            act = np.array([(SIT_Q[n] - DEFAULT_Q[n]) / SCALE[n] if n in SIT_Q else 0. for n in ACTION_JOINTS], np.float32)
+        else:
+            act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw)[None], "h_in": self.h})
+            act = act[0].astype(np.float32)
         # The public policy has no reward on its gimbal input; head yaw follows ch2 directly.
         if self.head_override:
             act[6] = gimbal_yaw / SCALE["head_yaw_joint"]
@@ -213,6 +221,14 @@ class Sim:
             self.delay.append(act)
             a = self.delay.pop(0)
             for i, n in enumerate(ACTION_JOINTS):
+                if self.sit and n in SIT_Q:
+                    # sitting is parked, not balanced: legs move to the folded pose kinematically (the motors
+                    # cannot lift the body's weight there), at most 3 rad/s, and the body settles on its base
+                    q = d.qpos[self.jq[n]]
+                    d.qpos[self.jq[n]] = q + max(-3 * DT, min(3 * DT, SIT_Q[n] - q))
+                    d.qvel[self.jv[n]] = 0.
+                    d.ctrl[self.ja[n]] = 0.
+                    continue
                 damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
                 d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)
             if "head_roll_joint" in self.ja:

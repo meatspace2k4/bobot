@@ -89,6 +89,7 @@ class TwinSource:
     # ---- source interface
     def start(self, sim):
         self.t = 0.0
+        sim.sit = False
         self.srv.reset()
         self.set_armed(self.drive)
         if self.kb:
@@ -114,7 +115,9 @@ class TwinSource:
             return ch
         if st is None or age >= STALE:
             return list(NEUTRAL)
-        self.remind(sim.d, st["pose"])
+        sim.sit = st.get("posture") == "sit"
+        if not sim.sit:
+            self.remind(sim.d, st["pose"])
         return list(st["ch"])
 
     def remind(self, d, pose):
@@ -158,6 +161,7 @@ class TwinSource:
         with self.srv.lock:
             st = self.srv.state
             frame = self.srv.frame if self.srv.frame_new else None
+            live_cam = time.monotonic() - self.srv.frame_t < 1.0   # a camera feed in the last second
             self.srv.frame_new = False
             marks = list(self.srv.marks)
             path = list(self.srv.path)
@@ -219,13 +223,13 @@ class TwinSource:
             C = P + D * f
             # The frame is drawn in the viewer's user scene, not as a model geom: no geom-group toggle
             # (number keys) can hide it, and the head-camera inset (its own scene) never sees it.
-            if scn.ngeom < scn.maxgeom:
+            if live_cam and scn.ngeom < scn.maxgeom:      # no camera feed -> no frame, no frustum
                 g = scn.geoms[scn.ngeom]
                 mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_BOX, np.array([w / 2, h / 2, 0.002]), C,
                                     R.flatten(), np.array([1, 1, 1, 1], np.float32))
                 g.matid = self.mat
                 scn.ngeom += 1
-            for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
+            for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)) if live_cam else ():
                 self._line(scn, P, C + sx * r * w / 2 + sy * u * h / 2, (1, 1, .3, 1), 2)
             pts = [to_sim(*p) for p in path]
             for i in range(1, len(pts)):

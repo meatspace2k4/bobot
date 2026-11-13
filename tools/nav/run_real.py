@@ -22,10 +22,15 @@ ap.add_argument("--turn-max", type=float, default=0.3)
 ap.add_argument("--tilt", type=float, default=-0.3, help="head tilt command -1 (down) .. 1 (up); keeps the floor in view")
 ap.add_argument("--sim-tilt-max", type=float, default=math.radians(45), help="beni_view --tilt-max, to mirror the measured pitch")
 ap.add_argument("--max-seconds", type=float, default=150)
+ap.add_argument("--standing", action="store_true", help="Beni is standing (policy running). Default: sitting = "
+                "disabled: no driving, head checked before a reduced, monitored sweep")
+ap.add_argument("--scan-only", action="store_true", help="head-sweep scan and map, then stop (no driving)")
 ap.add_argument("--keep", help="URL of a bridge to hold open unarmed (keeps the root bridge and its Wi-Fi alive)")
 a = ap.parse_args()
 
 tour = RgbBoxTour(a.hfov, a.cam_h, a.vmax, spin=a.spin, turn_max=a.turn_max)
+tour.sitting = not a.standing
+tour.sweep_amp = 1.0 if a.standing else 0.6
 link = BridgeLink(a.url)
 twin = TwinPublisher()
 os.makedirs(os.path.join(HERE, "..", "..", "captures", "nav"), exist_ok=True)
@@ -108,14 +113,18 @@ try:
         # the sim gets the measured camera pitch (not the tilt command) in ch3's tilt bits
         sim_tilt = max(0, min(62, round(31 + tour.per.pitch / a.sim_tilt_max * 31)))
         twin.state([1000 + thr * 999, 1000 + yc * 999, 1000 + tour.head * 999, 1984 | sim_tilt, 32, 546],
-                   (tour.x, tour.y, tour.yaw), cam_pose(), tour.per.hfov)
+                   (tour.x, tour.y, tour.yaw), cam_pose(), tour.per.hfov, "stand" if a.standing else "sit")
         if int(now * 2) != int((now - 1 / 30) * 2):
             twin.marks(tour.order if tour.order else [m for m in tour.marks if m[3] >= 3])
         s = tour.status()
-        if s.split()[0] != lastp:
-            lastp = s.split()[0]
+        if s.split()[0] != lastp or (tour.abort and lastp != "abort"):
+            lastp = "abort" if tour.abort else s.split()[0]
             print(f"{now - t0:6.1f}s {s}", flush=True)
-        if tour.phase == "done":
+        if tour.phase == "done" or (a.scan_only and tour.phase == "tour"):
+            if a.scan_only:
+                twin.marks(tour.order)
+                print(f"scan done: {len(tour.order)} objects mapped", flush=True)
+                time.sleep(1.0)
             break
         time.sleep(1 / 30)
 except KeyboardInterrupt:
