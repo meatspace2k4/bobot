@@ -237,7 +237,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), v=head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), v=-head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
