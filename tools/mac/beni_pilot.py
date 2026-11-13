@@ -8,9 +8,10 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick X     steer
   R2 / L2          throttle / reverse, used only while the left stick Y is centered
   right stick X    head pan (ch2, confirmed 2026-11-12)
-  Cross            stick held (|LX|+|LY| >= 0.5): flip toward the stick in Beni's body frame (stick up = front flip),
-                   snapped to Beni's 4 flips. Stick centered: jump. Beni's flip includes its own takeoff, so the
-                   flip goes out on the first press; RL's dodge threshold and direction rules are kept (RLUtilities).
+  Cross            Rocket League: 1st press = jump (straight up, stick ignored).
+                   2nd press within 1.5 s = direction jump toward the left stick if |LX|+|LY| >= 0.5
+                   (body frame, stick up = forward, snapped to Beni's 4 flips), else double jump (= jump).
+                   Window and threshold from RLUtilities dodge.cc.
   D-pad            direct flips: up = forward, down = back, left = left, right = right
   Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
@@ -209,7 +210,12 @@ def main():
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
                     elif e.button == B_CROSS and js:
-                        a = rl_dodge(js.get_axis(A_LX), js.get_axis(A_LY)) or "jump"
+                        now_j = time.monotonic()
+                        if jump_t is not None and not dodged and now_j - jump_t < DODGE_TIMEOUT:
+                            a = rl_dodge(js.get_axis(A_LX), js.get_axis(A_LY)) or "jump"  # 2nd press
+                            dodged = True
+                        else:
+                            a, jump_t, dodged = "jump", now_j, False  # 1st press: straight up
                         sh.ctl["action"] = last_action = a
 
         with sh.lock:
