@@ -105,6 +105,34 @@ class StickYaw:
         return (self.theta / 180.0) * c, (self.held_tilt if tilt_in_turn else 0.0)
 
 
+class RLDrive:
+    """Rocket League ground throttle (RLBot wiki Useful-Game-Values; RLUtilities car.cc constants), on an
+    estimated velocity in uu/s. Throttle opposing motion (|v| > 10) = brake at 3500 uu/s^2 (any amount):
+    command 0 and let Beni's own model decelerate; once the estimate reaches zero, reverse is passed through.
+    Zero throttle coasts at 525 uu/s^2. Throttle accel = u * (1550 - |v|), top speed 1410.
+    These are accelerations, so mass cancels: full-speed brake takes 1410/3500 ~= 0.40 s."""
+    BRAKE, COAST, FORCE, VMAX, MIN_V, THRESH = 3500.0, 525.0, 1550.0, 1410.0, 10.0, 0.05
+
+    def __init__(self):
+        self.v = 0.0
+
+    def step(self, u, dt):
+        v, sgn = self.v, (1.0 if self.v > 0 else -1.0)
+        if u * sgn < -0.001 and abs(v) > self.MIN_V:              # opposing input: brake, send 0
+            nv = v - sgn * self.BRAKE * dt
+            self.v = 0.0 if nv * sgn < 0 else nv
+            return 0.0
+        if abs(u) < self.THRESH:                                   # coast
+            if abs(v) > self.MIN_V:
+                nv = v - sgn * self.COAST * dt
+                self.v = 0.0 if nv * sgn < 0 else nv
+            else:
+                self.v = 0.0
+            return 0.0
+        self.v = max(-self.VMAX, min(self.VMAX, v + u * max(0.0, self.FORCE - abs(v)) * dt))
+        return u
+
+
 def raw(v):
     """Stick value as-is (-1..1), zero only inside the drift deadzone."""
     return 0.0 if abs(v) < DEADZONE else max(-1.0, min(1.0, v))
