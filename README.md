@@ -1,0 +1,28 @@
+# bobot: Beni (Mondo Robotics) protocol RE
+
+Protocol notes are in [protocol.md](protocol.md), and the topic ID table is in [topics.md](topics.md).
+
+## Tools
+| path | what |
+|---|---|
+| `tools/pktap_summary.py` | Summarize an rvictl pcap/pcapng by interface, process and flow |
+| `tools/ucp_timeline.py` | UCP (UDP 9007) message timeline, without video |
+| `tools/beni_video.py` | H.265 depacketizer: `--from-pcap` or `--live` (50 Hz ack) |
+| `tools/beni_drive.py` | Capped stick-frame client (11-bit RC channels) |
+| `tools/pi/` | Live video relay: Pi joins Beni and serves the stream over a cloudflared quick tunnel |
+| `tools/mac/beni_play.sh` | ffplay retry loop for the tunnel URL |
+
+## Live video on the Mac
+One-time setup:
+```bash
+tools/pi/install.sh jpark@aircheck-pi.local
+```
+Then on the Pi, create `/opt/beni/beni.env` from `beni.env.example` (`chmod 600`).
+
+Each session:
+1. On the Pi, run `sudo bash /opt/beni/beni_start.sh`. It prints the trycloudflare URL and starts a 10-minute relay. Your SSH drops when wlan0 joins Beni.
+2. On the Mac, run `tools/mac/beni_play.sh <url>`.
+
+The Pi returns to the home Wi-Fi when the relay stops. Rerunning `beni_start.sh` reuses the tunnel and its URL.
+
+Captures (`captures/`, ~2 GB) and `beni.env` are not tracked.
