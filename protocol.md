@@ -49,6 +49,8 @@ Jump and flips are not encrypted. They ride in the 50 Hz stick frame as a ~190 m
 
 Order confirmed by the operator: jump, then back, left, right, forward.
 
+**Mid-air direction jump works** (confirmed live 2026-11-12): a flip code sent within 1.5 s of a jump code fires in the air. This gives Rocket League-style jump, then a jump toward the stick.
+
 **ch2 is head pan** (confirmed live 2026-11-12): it rests at 1000, and 1..1999 pans the head across its range. ch3 sits at 2015 and is still undecoded.
 
 - The first jump drew a robot `device/status/rc/fsm_state` push (tag 0x5a) about 50 ms later.
