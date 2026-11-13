@@ -83,7 +83,8 @@ def build_xml(root_dir: Path) -> str:
     # The real head has no roll freedom; the model's ±0.05 rad roll joint rocks it loose.
     if not KEEP_HEAD_ROLL:
         head.remove(head.find('joint[@name="head_roll_joint"]'))
-    ET.SubElement(head, "camera", name="head_cam", pos="0.06 0 0.05", xyaxes="0 -1 0 0 0 1", fovy="70")
+    # fovy 64.4 = 80 deg horizontal at 4:3, the real camera (measured 2026-11-13)
+    ET.SubElement(head, "camera", name="head_cam", pos="0.06 0 0.05", xyaxes="0 -1 0 0 0 1", fovy="64.4")
     # Chase camera rig: a mocap body that Sim moves to Beni's position and heading every step
     # (yaw only, ground level), with a camera behind and above looking forward. Shows up in
     # MuJoCo's camera list as "chase", next to "head_cam".

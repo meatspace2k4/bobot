@@ -8,7 +8,7 @@ with replay scenes from captures and scripted sources, plus an optional UI overl
 Each capture's stick timeline (topic_trace.py *.sticks.csv) is a collection; each burst of stick
 activity is a scene. "Box tour" drives to each box in clockwise order through the same stick channels.
 Keys: F6/F7 scene, F8/F9 collection, F10 camera follows head/body (keeps the view angle),
-F12 arm/disarm in the live scene (arrow keys then drive the real Beni through the sim); everything else is MuJoCo's viewer (Tab panels, Space pause, ...).
+in the live collection F6/F7 switch watch / drive (drive: arrow keys drive the real Beni through the sim); everything else is MuJoCo's viewer (Tab panels, Space pause, ...).
 
 usage: mjpython beni_view.py --open-beni PATH --traces DIR [--dev]
 """
@@ -368,6 +368,13 @@ class FollowCamera:
         c.azimuth = self.set_az = self.h + self.offset
 
 
+def twin_scenes(m):
+    """Live collection: watch the real Beni, or drive it with the arrow keys (one link, one keyboard)."""
+    from twin import TwinServer
+    srv, kb = TwinServer(), KeyboardSource()
+    return [TwinSource(m, STEP, kb, server=srv), TwinSource(m, STEP, kb, server=srv, drive=True)]
+
+
 def run(a, ui):
     """The developer dashboard: MuJoCo's stock viewer and panels driving the sim and sources.
     ui=True adds the Overlay (and starts with the panels folded; Tab / Shift+Tab bring them back).
@@ -377,7 +384,7 @@ def run(a, ui):
     m, d = sim.m, sim.d
     boxes, box_geoms = find_boxes(m)
     cols = [("manual", [KeyboardSource()])] + capture_collections(a.traces) + [("scripted", [BoxTour(boxes)]),
-                                                                                ("live", [TwinSource(m, STEP, KeyboardSource())])]
+                                                                                ("live", twin_scenes(m))]
     st = dict(col=next((i for i, c in enumerate(cols) if c[0] == a.start), 0), cur=0, pending=True, toggle_head=False, toggle_arm=False)
     overlay = Overlay(sim) if ui else None
 
@@ -406,7 +413,7 @@ def run(a, ui):
     # Both views: follow camera; the mouse orbit is kept as an offset on top of Beni's heading.
     follow = FollowCamera(v, m, base, d, distance=1.2 if ui else 1.1, elevation=-20. if ui else -18.,
                           head_q=sim.jq.get("head_yaw_joint"))
-    print("F6/F7 scene, F8/F9 collection, F10 camera follows head/body, F12 arm/disarm (live scene)", flush=True)
+    print("F6/F7 scene, F8/F9 collection, F10 camera follows head/body, live scene: F7 drive / F6 watch", flush=True)
     n = lambda x: max(-1., min(1., (x - 1000) / 999))
     last_ch4, src, ch, vx, wz = 32, None, list(NEUTRAL), 0., 0.
     acc, last, label_next = 0., time.monotonic(), 0.

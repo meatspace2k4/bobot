@@ -26,9 +26,12 @@ MAX_POINTS = 3000
 class TwinSource:
     name = "Real Beni"
 
-    def __init__(self, m, step, keyboard=None):
-        self.srv = TwinServer()
+    def __init__(self, m, step, keyboard=None, server=None, drive=False):
+        self.srv = server or TwinServer()
         self.kb = keyboard            # arrow keys (beni_view.KeyboardSource) for armed takeover
+        self.drive = drive            # the drive scene arms on entry; the watch scene stays disarmed
+        if drive:
+            self.name = "Real Beni drive"
         self.armed = False
         self.next_ctl = 0.0
         self.step = step
@@ -48,7 +51,7 @@ class TwinSource:
     def start(self, sim):
         self.t = 0.0
         self.srv.reset()
-        self.set_armed(False)
+        self.set_armed(self.drive)
         if self.kb:
             self.kb.start(sim)
 
@@ -95,7 +98,7 @@ class TwinSource:
     def status(self):
         with self.srv.lock:
             st, age, n = self.srv.state, time.monotonic() - self.srv.state_t, self.srv.clients
-        arm = ("ARMED: arrows drive the real Beni  (F12 disarm)  " + (self.kb.status() if self.kb else "")) if self.armed else "F12 arm"
+        arm = ("ARMED: arrows drive the real Beni  (F6/F7 to watch)  " + (self.kb.status() if self.kb else "")) if self.armed else "watch only  (F6/F7: drive scene)"
         if not n:
             return "waiting for the robot (tools/nav/run_teleop.py)  " + arm
         if st is None or age > STALE:
