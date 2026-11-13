@@ -31,7 +31,8 @@ OBS_JOINTS = ["L1", "R1", "head_yaw_joint", "L2", "R2", "LW", "RW"]
 DEFAULT_Q = {"L1": 0.3, "R1": 0.3, "L2": 0.5, "R2": 0.5, "LW": 0.0, "RW": 0.0,
              "head_yaw_joint": 0.0}
 # Sitting (Beni's disabled state): legs fully folded, wheels up, no policy. Placed kinematically.
-SIT_Q = {"L1": -2.5307 + 0.02, "R1": -2.5307 + 0.02, "L2": 1.13, "R2": 1.13}  # hips at their lower limit (thighs up
+POLICY_LIMITS = {"L1": (-2.679, 6.998), "R1": (-2.679, 6.998), "L2": (-0.908, 1.216), "R2": (-0.908, 1.216)}
+SIT_Q = {"L1": -2.679 + 0.01, "R1": -2.679 + 0.01, "L2": 1.21, "R2": 1.21}  # hips at their lower limit (thighs up
 # and rotated forward over the top), knees folded; reached by the motors, not placed
 SIT_LIM = {"L1": 1.375, "R1": 1.375, "L2": 3.6, "R2": 3.6}  # actuator effort limits (open-beni beni_robot.py)
 SCALE = {"L1": .25, "R1": .25, "L2": .25, "R2": .25, "LW": 20.0, "RW": 20.0, "head_yaw_joint": .5}
@@ -83,6 +84,19 @@ def build_xml(root_dir: Path) -> str:
     if vis is None:
         vis = ET.SubElement(root, "visual")
     ET.SubElement(vis, "global", offwidth=str(OFF_W), offheight=str(OFF_H))
+    # Joint limits from the policy's own training states (open-beni assets/motions/recovery_*_states_*.npz):
+    # wider than the MJCF ranges (L1 -2.53..6.89, L2 -0.79..1.13).
+    for j, rng in POLICY_LIMITS.items():
+        el = root.find(f'.//joint[@name="{j}"]')
+        if el is not None:
+            el.set("range", f"{rng[0]} {rng[1]}")
+    # Sitting on the robot, the folded thighs sit flush with the base underside (the body rests flat); the model's
+    # thigh boxes reach 7 mm lower at the policy's hip limit and tip the body. Trimmed by that 7 mm.
+    for g in ("L1_collision", "R1_collision"):
+        el = root.find(f'.//geom[@name="{g}"]')
+        if el is not None:
+            sz = el.get("size").split()
+            el.set("size", f"{sz[0]} {sz[1]} {float(sz[2]) - 0.007:.3f}")
     head = root.find('.//body[@name="head"]')
     # The real head clears the folded thighs (hips at y +-0.048, thigh inner edge 0.053 m); the model's head
     # collision box is 0.12 m wide and does not. Narrowed to 0.10 m so the sit fold behaves like the robot.
