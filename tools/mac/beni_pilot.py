@@ -6,7 +6,8 @@ usage: beni_pilot.py https://<bridge>.trycloudflare.com
 Controls (DualSense). Stick values are passed through raw and linear, full range; the robot shapes motion itself.
   left stick Y     flip direction only (no throttle)
   left stick X     steer
-  R2 / L2          throttle / reverse
+  R2               gas (forward)
+  L2               brake (zero throttle); reverse only while the left stick is pulled back and R2 is released
   right stick      head yaw follows stick ANGLE (9:00 = look left, 6:00 = look behind; unwrapped, holds behind);
                    a push that starts straight back only tilts (no yaw) until the stick recenters
                    right stick Y also tilts: forward = look down, back = look up (ch3 low 6 bits)
@@ -273,7 +274,12 @@ def main():
             if test is not None:
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
-                t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
+                r2, l2 = trig(js.get_axis(A_R2)), trig(js.get_axis(A_L2))
+                stick_back = raw(js.get_axis(A_LY)) > 0.5
+                if l2 > 0.0:
+                    t = -l2 if (stick_back and r2 == 0.0) else 0.0  # L2 = brake; reverse only with stick back and no gas
+                else:
+                    t = r2
                 locked = cam_locked if args.cam_lock == "toggle" else bool(js.get_button(B_TRIANGLE))
                 rx_, ry_ = raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY))
                 if (rx_, ry_) != (0.0, 0.0) or not locked:  # locked: stick still works; release holds last aim
