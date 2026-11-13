@@ -154,7 +154,7 @@ class LookController:
         import math
         if self.locked:
             mag = math.hypot(rx, ry)
-            sideways = mag >= DEADZONE and not self.yaw._in_wedge(math.degrees(math.atan2(rx, -ry)))
+            sideways = mag >= 0.5 and not self.yaw._in_wedge(math.degrees(math.atan2(rx, -ry)))  # ignore spring-back noise near center
             if not sideways:
                 self.armed = True
             elif self.armed:
