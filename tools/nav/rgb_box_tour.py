@@ -157,7 +157,9 @@ class RgbBoxTour:
                     self.head = 0.0
                     moves = [(c, dy) for c, dy in self.bursts if c != 0.0]
                     exp = W * self.deg_per_unit
-                    ok = len(moves) >= 2 and all(abs(dy) > 0.5 * exp and (dy > 0) == (c > 0) for c, dy in moves)
+                    good = [abs(dy) > 0.5 * exp and (dy > 0) == (c > 0) for c, dy in moves]
+                    wrong = [abs(dy) > 0.5 * exp and (dy > 0) != (c > 0) for c, dy in moves]
+                    ok = sum(good) >= 2 and not any(wrong)      # one burst may land while the head is still settling
                     if ok:
                         self.phase, self.turned, self.t_survey = "survey", 0.0, self.t
                     else:
