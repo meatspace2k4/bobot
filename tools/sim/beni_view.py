@@ -473,18 +473,19 @@ def run(a, ui):
         if st["pending"]:
             st["pending"] = False
             with v.lock():
-                sim.reset()
-                src = cols[st["col"]][1][st["cur"]]
+                new = cols[st["col"]][1][st["cur"]]
+                # sit <-> stand is a posture change of the same robot: no reset, the motors move it
+                if not (isinstance(src, PostureSource) and isinstance(new, PostureSource)):
+                    sim.reset()
+                    sim.sit = False
+                src = new
                 show_boxes(m, box_geoms, isinstance(src, BoxTour))
                 TwinSource.hide(m, d)
                 v.user_scn.ngeom = 0
-                sim.sit = False
                 src.start(sim)
             last_ch4, acc = 32, 0.
             if overlay:
-                overlay.reset()
-                follow.h = follow.ref(d)
-                follow.reset()
+                overlay.reset()   # the camera keeps the user's view
             print(f"{cols[st['col']][0]} / {src.name}", flush=True)
         with v.lock():
             while acc >= STEP:

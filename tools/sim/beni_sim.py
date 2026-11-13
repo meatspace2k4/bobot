@@ -298,15 +298,12 @@ class Sim:
         self._sat = True
 
     def leave_sit(self):
-        """Back to standing at the same position and heading (the policy takes over from the default pose)."""
-        d = self.d
-        x, y = d.qpos[0], d.qpos[1]
-        w, qx, qy, qz = d.qpos[3:7]
-        h = math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
-        self.reset()
-        d.qpos[0], d.qpos[1] = x, y
-        d.qpos[3:7] = (math.cos(h / 2), 0, 0, math.sin(h / 2))
-        mujoco.mj_forward(self.m, d)
+        """Hand back to the policy where Beni is: it stands up from the folded pose with its own motors
+        (folded-leg states are in its recovery training). Only the policy's memory is cleared."""
+        self.h = np.zeros((1, 1, 512), np.float32)
+        self.last = np.zeros(7, np.float32)
+        self.delay = [np.zeros(7, np.float32) for _ in range(DELAY_SUBSTEPS)]
+        self.vx = self.wz = 0.
         self._sat = False
 
     def update_rig(self):
