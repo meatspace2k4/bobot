@@ -11,6 +11,7 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   right stick      one mode per push: starts within 30 deg of 12:00/6:00 = tilt only (forward = look down,
                    back = look up); outside that wedge = yaw only, following the stick angle (9:00 = look left,
                    6:00 = look behind, unwrapped, holds behind). No tilt while turning.
+  Triangle         toggle look up/down while turning, for pushes started outside the dead zone
   R3 (click)       toggle look lock: yaw freezes where the head points (works mid-turn); up/down still tilts.
                    After the stick is released or in the up/down wedge, the next sideways push unlatches it.
                    both with expo curve --head-expo (default 4.0)
@@ -77,7 +78,8 @@ class StickYaw:
 
     def __init__(self):
         self.theta, self.mode = 0.0, None   # mode: None | "tilt" | "yaw"
-        self.held_tilt = 0.0                # tilt set in the starting wedge, carried into a turn
+        self.held_tilt = 0.0                # tilt set in the starting wedge
+        self.started_in_wedge = False
 
     def _in_wedge(self, a):
         return abs(a) <= self.WEDGE or abs(a) >= 180.0 - self.WEDGE
@@ -92,6 +94,7 @@ class StickYaw:
         c = head_curve(mag, expo)
         if self.mode is None:
             self.mode = "tilt" if self._in_wedge(a) else "yaw"
+            self.started_in_wedge = self.mode == "tilt"
             self.theta = a
         if self.mode == "tilt":
             if self._in_wedge(a):
@@ -100,7 +103,7 @@ class StickYaw:
             self.mode, self.theta = "yaw", a          # broke out sideways: yaw from here
         d = (a - self.theta + 180.0) % 360.0 - 180.0
         self.theta = max(-180.0, min(180.0, self.theta + d))
-        return (self.theta / 180.0) * c, (self.held_tilt if tilt_in_turn else 0.0)
+        return (self.theta / 180.0) * c, (-head_curve(ry, expo) if (tilt_in_turn and not self.started_in_wedge) else 0.0)
 
 
 class RLDrive:
@@ -150,7 +153,7 @@ class LookController:
         self.locked = not self.locked
         self.armed, self.lock_h = False, self.last[0]
 
-    def step(self, rx, ry, expo):
+    def step(self, rx, ry, expo, tilt_in_turn=False):
         import math
         if self.locked:
             mag = math.hypot(rx, ry)
@@ -163,7 +166,7 @@ class LookController:
         if self.locked:
             self.last = (self.lock_h, -head_curve(ry, expo))
         else:
-            self.last = self.yaw.step(rx, ry, expo)
+            self.last = self.yaw.step(rx, ry, expo, tilt_in_turn)
         return self.last
 
 
@@ -294,7 +297,7 @@ def main():
     yaw = StickYaw()
     t_prev = time.monotonic()
     drive = RLDrive()
-    head_hv, look = (0.0, 0.0), LookController()
+    head_hv, look, tri_tilt = (0.0, 0.0), LookController(), False
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -314,6 +317,8 @@ def main():
                 with sh.lock:
                     if e.button == B_R3:
                         look.toggle()
+                    elif e.button == B_TRIANGLE:
+                        tri_tilt = not tri_tilt
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
                     elif e.button == B_CROSS and js:
@@ -339,7 +344,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = drive.step(trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)), dt_loop)
-                head_hv = look.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo)
+                head_hv = look.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo, tri_tilt)
                 sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_hv[0], v=head_hv[1], boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
