@@ -248,9 +248,10 @@ class Sim:
             a = self.delay.pop(0)
             for i, n in enumerate(ACTION_JOINTS):
                 if self.sit and n in SIT_Q:
-                    # sit fold: position control to the folded pose, torque held to the actuator limits
-                    e = SIT_Q[n] - d.qpos[self.jq[n]]
-                    d.ctrl[self.ja[n]] = float(np.clip(8. * e - .2 * d.qvel[self.jv[n]], -SIT_LIM[n], SIT_LIM[n]))
+                    # sit fold: the same motor model as walking (open-beni actuator gains, limits, knee spring),
+                    # targeting the folded pose
+                    damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
+                    d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)
                     continue
                 if self.sit and n in ("LW", "RW"):
                     d.ctrl[self.ja[n]] = 0.
