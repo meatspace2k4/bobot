@@ -113,11 +113,6 @@ def build_xml(root_dir: Path) -> str:
         mk = ET.SubElement(wb, "body", name=f"twin_mark{i}", mocap="true", pos="0 0 -5")
         ET.SubElement(mk, "geom", name=f"twin_mark{i}", type="box", size=".1 .1 .1", rgba=".2 .8 1 .45",
                       contype="0", conaffinity="0")
-    # The model's head collision box overlaps the upper legs whenever L1 < ~0 (sitting); the real head never
-    # touches the legs, so those pairs are excluded (the head turns freely while sitting).
-    contact = root.find("contact") if root.find("contact") is not None else ET.SubElement(root, "contact")
-    for leg in ("L1_Link", "L2_Link", "LW_Link", "R1_Link", "R2_Link", "RW_Link"):
-        ET.SubElement(contact, "exclude", body1="head", body2=leg)
     from viewer_ui import dress_scene
     dress_scene(root)
     return ET.tostring(root, encoding="unicode")
