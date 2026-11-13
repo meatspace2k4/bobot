@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """Fly Beni from the Mac: live video plus a DualSense, through beni_bridge.
 
-usage: beni_pilot.py https://<bridge>.trycloudflare.com [--cap 0.3]
+usage: beni_pilot.py https://<bridge>.trycloudflare.com
 
-Controls (DualSense, Rocket League default layout):
-  R2 / L2          throttle / reverse (analog)
+Controls (DualSense). Stick values are passed through raw and linear, full range; the robot shapes motion itself.
+  left stick Y     throttle (forward/back)
   left stick X     steer
-  Cross            jump;  Cross with the left stick deflected = flip that way (forward/back/left/right)
-  Square (hold)    boost: speed cap jumps to the bridge's max
-  Circle (hold)    powerslide: 1.6x steer gain
-  Touchpad click   E-STOP (latched on the bridge, disarms)
+  R2 / L2          throttle / reverse, used only while the left stick Y is centered
+  Cross            jump
+  D-pad            flips: up = forward, down = back, left = left, right = right
+  Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
-  D-pad up/down    speed cap +/- 10 %
 Keyboard: Space = e-stop, C = clear, Esc = quit.
-No arming step: sticks are live while the controller is connected. Link loss (>300 ms) -> neutral on the bridge.
+Sticks are live while the controller is connected. Link loss (>300 ms) -> neutral on the bridge.
 
 Test without hardware: --headless --test-input "t=0.5,y=0,arm=1" --seconds 8
 """
@@ -22,26 +21,22 @@ import argparse, asyncio, collections, json, os, subprocess, threading, time
 os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
 W, H = 960, 720
-DEADZONE = 0.08
+DEADZONE = 0.04  # only to kill stick drift at rest; values outside it pass through unscaled
 # SDL2 joystick indices for DualSense
-B_CROSS, B_CIRCLE, B_SQUARE, B_CREATE, B_OPTIONS, B_UP, B_DOWN, B_TOUCH = 0, 1, 2, 4, 6, 11, 12, 15
+B_CROSS, B_OPTIONS, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 6, 11, 12, 13, 14, 15
 A_LX, A_LY, A_L2, A_R2 = 0, 1, 4, 5
-FLIP_THRESHOLD = 0.5
-POWERSLIDE_GAIN = 1.6
+DPAD_FLIPS = {B_UP: "flip_forward", B_DOWN: "flip_back", B_LEFT: "flip_left", B_RIGHT: "flip_right"}
 
 
 def trig(v):
-    """DualSense trigger axis rests at -1, full press +1 -> 0..1 with a small deadzone."""
+    """DualSense trigger axis rests at -1, full press +1 -> 0..1."""
     x = (v + 1.0) / 2.0
-    return 0.0 if x < 0.05 else min(1.0, (x - 0.05) / 0.95)
+    return 0.0 if x < DEADZONE else min(1.0, x)
 
 
-def flip_dir(lx, ly):
-    if max(abs(lx), abs(ly)) < FLIP_THRESHOLD:
-        return "jump"
-    if abs(ly) >= abs(lx):
-        return "flip_forward" if ly < 0 else "flip_back"
-    return "flip_right" if lx > 0 else "flip_left"
+def raw(v):
+    """Stick value as-is (-1..1), zero only inside the drift deadzone."""
+    return 0.0 if abs(v) < DEADZONE else max(-1.0, min(1.0, v))
 
 
 class Shared:
@@ -187,21 +182,18 @@ def main():
                         sh.ctl["estop"] = True
                     elif e.button == B_OPTIONS:
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
-                    elif e.button == B_UP:
-                        sh.ctl["cap"] = round(min(1.0, sh.ctl["cap"] + 0.1), 2)
-                    elif e.button == B_DOWN:
-                        sh.ctl["cap"] = round(max(0.1, sh.ctl["cap"] - 0.1), 2)
-                    elif e.button == B_CROSS and js:
-                        sh.ctl["action"] = last_action = flip_dir(js.get_axis(A_LX), js.get_axis(A_LY))
+                    elif e.button in DPAD_FLIPS:
+                        sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
+                    elif e.button == B_CROSS:
+                        sh.ctl["action"] = last_action = "jump"
 
         with sh.lock:
             if test is not None:
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
-                gain = POWERSLIDE_GAIN if js.get_button(B_CIRCLE) else 1.0
-                sh.ctl.update(t=trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)),
-                              y=max(-1.0, min(1.0, dz(js.get_axis(A_LX)) * gain)),
-                              boost=bool(js.get_button(B_SQUARE)), arm=True)
+                ly = -raw(js.get_axis(A_LY))  # stick up = forward
+                t = ly if ly != 0.0 else trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
