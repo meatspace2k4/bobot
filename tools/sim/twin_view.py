@@ -206,9 +206,14 @@ class TwinSource:
             r, u, f = R[:, 0], R[:, 1], -R[:, 2]
             q = np.zeros(4)
             mujoco.mju_mat2Quat(q, R.flatten())
-            w = 2 * PLANE_D * math.tan(math.radians(hfov) / 2) * lens_extent(k1)
-            h = w * self.tex_h / self.tex_w
-            C = P + PLANE_D * f
+            tanh = math.tan(math.radians(hfov) / 2) * lens_extent(k1)
+            tanv = tanh * self.tex_h / self.tex_w
+            # plane distance: as far as PLANE_D but with the photo's bottom edge kept above the floor
+            # (a plane through the floor hides the lower photo and nothing lines up)
+            down = math.atan(tanv) - pitch                    # angle of the bottom edge below horizontal
+            D = PLANE_D if down <= 0.02 else min(PLANE_D, 0.9 * P[2] / math.tan(down))
+            w, h = 2 * D * tanh, 2 * D * tanv
+            C = P + D * f
             d.mocap_pos[self.cam_body] = C
             d.mocap_quat[self.cam_body] = q
             m.geom_size[self.plane] = (w / 2, h / 2, 0.002)

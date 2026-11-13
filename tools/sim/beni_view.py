@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Beni sim: the developer dashboard (MuJoCo's stock viewer and panels) driving the bench sim
-with replay scenes from captures and scripted sources, plus an optional UI overlay.
+"""Beni sim: the bench sim driven by replay scenes from captures, scripted sources and the live twin.
 
-  --dev   dashboard only
-  (none)  dashboard + overlay: HUD, head-camera inset, history chart, scene tabs, chase camera
+  (none)  normal view: HUD, head-camera inset, history chart, scene tabs, follow camera
+  --dev   debugger view: MuJoCo's stock viewer with its panels (for debugging only)
 
 Each capture's stick timeline (topic_trace.py *.sticks.csv) is a collection; each burst of stick
 activity is a scene. "Box tour" drives to each box in clockwise order through the same stick channels.
@@ -233,8 +232,8 @@ KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F12 = 295, 296, 297, 298, 299, 301
 
 
 class Overlay:
-    """The UI layer on top of the dev dashboard: HUD, head-camera inset, history chart, scene tabs,
-    chase camera. Uses only the stock viewer's overlay API, so the dashboard itself is unchanged."""
+    """The normal view's UI layer: HUD, head-camera inset, history chart, scene tabs.
+    Uses only the stock viewer's overlay API."""
     INSET_W, INSET_H = 480, 360
 
     def __init__(self, sim):
@@ -284,7 +283,8 @@ class Overlay:
         spd = d.qvel[0] * math.cos(hdg) + d.qvel[1] * math.sin(hdg)
         self.speed.append(spd)
         self.yaw.append(d.qvel[5])
-        sim.set_tilt(tilt_pitch)
+        if tilt_pitch is not None:  # the live twin sets the head camera itself (measured pitch and roll)
+            sim.set_tilt(tilt_pitch)
         self.inset.update_scene(d, camera=sim.cam)
         img = self.inset.render().copy()
         act = self.last_action if self.last_action and now - self.last_action_t < 2 else ""
@@ -376,8 +376,8 @@ def twin_scenes(m):
 
 
 def run(a, ui):
-    """The developer dashboard: MuJoCo's stock viewer and panels driving the sim and sources.
-    ui=True adds the Overlay (and starts with the panels folded; Tab / Shift+Tab bring them back).
+    """ui=True: the normal view (Overlay, panels folded; Tab / Shift+Tab bring them back).
+    ui=False: the debugger view, MuJoCo's stock viewer with its panels.
     Run under mjpython on macOS. F6 / F7 previous / next scene, F8 / F9 previous / next collection."""
     from mujoco import viewer as mjviewer
     sim = Sim(a)
@@ -413,6 +413,8 @@ def run(a, ui):
     # Both views: follow camera; the mouse orbit is kept as an offset on top of Beni's heading.
     follow = FollowCamera(v, m, base, d, distance=1.2 if ui else 1.1, elevation=-20. if ui else -18.,
                           head_q=sim.jq.get("head_yaw_joint"))
+    if a.camera:
+        v.cam.type, v.cam.fixedcamid = mujoco.mjtCamera.mjCAMERA_FIXED, mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, a.camera)
     print("F6/F7 scene, F8/F9 collection, F10 camera follows head/body, live scene: F7 drive / F6 watch", flush=True)
     n = lambda x: max(-1., min(1., (x - 1000) / 999))
     last_ch4, src, ch, vx, wz = 32, None, list(NEUTRAL), 0., 0.
@@ -471,7 +473,8 @@ def run(a, ui):
         if overlay:
             with v.lock():
                 follow.update(d)
-            overlay.draw(v, cols, st["col"], st["cur"], src, ch, vx, wz, (((ch[3] & 0x3F) - 31) / 31) * a.tilt_max)
+            overlay.draw(v, cols, st["col"], st["cur"], src, ch, vx, wz,
+                         None if isinstance(src, TwinSource) else (((ch[3] & 0x3F) - 31) / 31) * a.tilt_max)
         else:
             # Stock view: follow camera; corner label names collection, scene and time.
             with v.lock():
@@ -493,10 +496,11 @@ def main():
     ap.add_argument("--wz-max", type=float, default=1.8, help="rad/s at full stick")
     ap.add_argument("--pan-max", type=float, default=math.radians(168), help="head yaw rad at ch2 = 1 (left); measured by head-sweep flow")
     ap.add_argument("--tilt-max", type=float, default=math.radians(45))
-    ap.add_argument("--dev", action="store_true", help="debugger view: dashboard with the overlay")
+    ap.add_argument("--dev", action="store_true", help="debugger view: MuJoCo's stock viewer and panels (default: normal view)")
     ap.add_argument("--start", default="manual", help="collection to open on (manual, live, scripted, ...)")
+    ap.add_argument("--camera", help="open looking through this model camera (e.g. head_cam)")
     a = ap.parse_args()
-    run(a, ui=a.dev)
+    run(a, ui=not a.dev)
 
 
 if __name__ == "__main__":

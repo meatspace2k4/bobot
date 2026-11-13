@@ -1,8 +1,8 @@
 #!/bin/sh
 # Sim launch configurations.
-#   viewer  MuJoCo's stock viewer and panels (F6/F7 scene, F8/F9 collection)
-#   dev     debugger view: stock viewer + HUD, head-camera inset, history chart, scene tabs, chase camera
-#   twin    stock view opened on the live scene: mirrors the real Beni (tools/nav/run_real.py)
+#   viewer  normal view: HUD, head-camera inset, history chart, scene tabs, follow camera
+#   dev     debugger view: MuJoCo's stock viewer and panels (for debugging)
+#   twin    normal view opened on the live scene: mirrors / drives the real Beni (tools/nav/run_teleop.py)
 #   bench   headless bench Beni on udp 127.0.0.1:19007 for beni_bridge.py / the beni SDK
 # Needs: third_party/open-beni (git clone https://github.com/Mondo-Robotics/open-beni),
 #        .venv-sim (python3 -m venv .venv-sim && .venv-sim/bin/pip install mujoco onnxruntime numpy),

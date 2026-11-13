@@ -55,9 +55,10 @@ CLI: `python3 -m beni probe | record out.hevc | action jump`. Demo: `examples/dr
 Not covered: telemetry and app commands (E2E-encrypted).
 
 ## Sim (no robot)
-`tools/sim/launch.sh viewer | dev | bench`, also listed as VS Code launch configurations.
-- `viewer`: HUD, head-camera inset, chart, buttons for replay scenes and the box tour
-- `dev`: MuJoCo's stock viewer with its panels, same sim and sources (F6/F7 scene, F8/F9 collection)
+`tools/sim/launch.sh viewer | dev | twin | bench`, also listed as VS Code launch configurations.
+- `viewer`: normal view: HUD, head-camera inset, chart, scene tabs (F6/F7 scene, F8/F9 collection)
+- `dev`: debugger view: MuJoCo's stock viewer with its panels, same sim and sources
+- `twin`: normal view on the live scene: mirrors the real Beni; F7 drive scene = arrow keys drive it
 - `bench`: headless robot on UDP 127.0.0.1:19007 for the bridge or the SDK
 
 Setup: clone open-beni into `third_party/`, create `.venv-sim` (`pip install mujoco onnxruntime numpy`),
