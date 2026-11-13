@@ -7,7 +7,8 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick Y     flip direction only (no throttle)
   left stick X     steer
   R2 / L2          throttle / reverse
-  right stick X    head pan (ch2); right stick Y: forward = look down, back = look up (ch3 low 6 bits)
+  right stick      head yaw follows stick ANGLE (9:00 = look left, 6:00 = look behind; unwrapped, holds behind)
+                   right stick Y also tilts: forward = look down, back = look up (ch3 low 6 bits)
                    both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
@@ -62,6 +63,30 @@ def trig(v):
 def head_curve(v, expo):
     """Head pan response: |v|^expo keeps full range at full deflection, finer near center."""
     return (abs(v) ** expo) * (1 if v >= 0 else -1)
+
+
+class StickYaw:
+    """Head yaw follows the right stick's ANGLE (0 = forward/up, +90 = right, +-180 = behind),
+    unwrapped so passing 6:00 keeps facing back instead of swinging around; clamped to +-180.
+    Push distance scales the turn through the head curve. Released stick -> face forward.
+    Returns ch2 command -1..1 (ch2 extremes = head turned 180)."""
+    def __init__(self):
+        self.theta = 0.0   # unwrapped degrees
+        self.active = False
+
+    def step(self, rx, ry, expo):
+        import math
+        mag = min(1.0, math.hypot(rx, ry))
+        if mag < DEADZONE:
+            self.active, self.theta = False, 0.0
+            return 0.0
+        a = math.degrees(math.atan2(rx, -ry))
+        if not self.active:
+            self.theta, self.active = a, True
+        else:
+            d = (a - self.theta + 180.0) % 360.0 - 180.0
+            self.theta = max(-180.0, min(180.0, self.theta + d))
+        return (self.theta / 180.0) * head_curve(mag, expo)
 
 
 def raw(v):
@@ -188,6 +213,7 @@ def main():
     playing, next_show, buffered = False, 0.0, 0
     last_action = None
     pend_t, pend_dir = None, None
+    yaw = StickYaw()
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -237,7 +263,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), v=-head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo), v=-head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
