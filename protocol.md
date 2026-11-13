@@ -35,6 +35,23 @@ off size field (LE)
   - body[9:11] = video ack
 - Before pilot mode starts, the phone sends 24 B 0x10 frames with body `fe05 <ack>` instead.
 
+## Action pulses (cleartext, ch4) — mapped 2026-11-12 22:54, `captures/beni-actions.pcap` (untracked)
+Jump and flips are not encrypted. They ride in the 50 Hz stick frame as a ~190 ms pulse (about 10 frames) on **ch4**, which rests at 32:
+`ch4 = 32 | code << 6`.
+
+| action | code | ch4 |
+|---|---|---|
+| jump | 1 | 96 |
+| flip forward | 4 | 288 |
+| flip back | 6 | 416 |
+| flip left | 8 | 544 |
+| flip right | 2 | 160 |
+
+- The first jump drew a robot `device/status/rc/fsm_state` push (tag 0x5a) about 50 ms later.
+- No encrypted 0x0d message accompanied any action; only the periodic ping and timer were seen.
+- ch5 was 546 in this session (545 in session 4); driving works with either.
+- Codes 3, 5, 7 and 9–15 are unexplored, and may be the other trained skills.
+
 ## Layer 2: pub/sub messages (UCP type 0x0d)
 Body: `a7 00 01 <len varint> 00 25 <msg seq varint> <op> ...`
 - At connect, each side declares key expressions, Zenoh-style: `1e 20 <id> 00 <len> <name>`, plus subscriber decls `1e 62 <id>` for `app/**` and `device/**`. The robot declares 99 topics and the phone 83. Both lists are in [topics.md](topics.md).
