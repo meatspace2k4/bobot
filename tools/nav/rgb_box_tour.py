@@ -144,7 +144,7 @@ class RgbBoxTour:
             elif self.phase == "wiggle":
                 # short bursts either side of centre; each must turn the camera by a fair share of what was
                 # commanded, else the head is mis-positioned (against a limit or the legs): no scan
-                W, B = 0.08, 0.45
+                W, B = (0.2, 0.9) if self.sitting else (0.08, 0.45)   # sitting: bigger, slower bursts
                 seq = (W, 0.0, -W, 0.0, W, 0.0)
                 k = int((self.t - self.t_phase) / B)
                 if k < len(seq):
@@ -173,7 +173,7 @@ class RgbBoxTour:
                 self.head = max(-A, min(A, self.head))
                 # the camera must follow the command: a stalled head (limit, legs) ends the sweep at once
                 lag = abs(self.head * self.deg_per_unit - math.degrees(self.turned))
-                self.stall_t = self.stall_t + dt if lag > 35 else 0.0
+                self.stall_t = self.stall_t + dt if lag > 60 else 0.0
                 if self.stall_t > 0.5:
                     self.abort = f"sweep stopped: head {self.head:+.2f} but camera {math.degrees(self.turned):+.0f} deg"
                     u = 1.0

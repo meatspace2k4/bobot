@@ -30,9 +30,10 @@ ACTION_JOINTS = ["L1", "R1", "L2", "R2", "LW", "RW", "head_yaw_joint"]
 OBS_JOINTS = ["L1", "R1", "head_yaw_joint", "L2", "R2", "LW", "RW"]
 DEFAULT_Q = {"L1": 0.3, "R1": 0.3, "L2": 0.5, "R2": 0.5, "LW": 0.0, "RW": 0.0,
              "head_yaw_joint": 0.0}
-# Sitting (Beni's disabled state): legs swung all the way back and folded, wheels up, no policy.
-# Joint ranges from open-beni assets/beni_base/mjcf/beni.xml: L1/R1 -2.5307..6.8940, L2/R2 -0.7854..1.1345.
-SIT_Q = {"L1": -2.5307 + 0.05, "R1": -2.5307 + 0.05, "L2": 1.1345 - 0.03, "R2": 1.1345 - 0.03, "LW": 0.0, "RW": 0.0}
+# Sitting (Beni's disabled state): legs fully folded, wheels up, no policy. Placed kinematically.
+SIT_Q = {"L1": -2.5307 + 0.02, "R1": -2.5307 + 0.02, "L2": 1.13, "R2": 1.13}  # hips at their lower limit (thighs up
+# and rotated forward over the top), knees folded; reached by the motors, not placed
+SIT_LIM = {"L1": 1.375, "R1": 1.375, "L2": 3.6, "R2": 3.6}  # actuator effort limits (open-beni beni_robot.py)
 SCALE = {"L1": .25, "R1": .25, "L2": .25, "R2": .25, "LW": 20.0, "RW": 20.0, "head_yaw_joint": .5}
 # open-beni python/beni_rl/beni_robot.py actuator config
 MOTOR = {
@@ -83,6 +84,12 @@ def build_xml(root_dir: Path) -> str:
         vis = ET.SubElement(root, "visual")
     ET.SubElement(vis, "global", offwidth=str(OFF_W), offheight=str(OFF_H))
     head = root.find('.//body[@name="head"]')
+    # The real head clears the folded thighs (hips at y +-0.048, thigh inner edge 0.053 m); the model's head
+    # collision box is 0.12 m wide and does not. Narrowed to 0.10 m so the sit fold behaves like the robot.
+    hc = head.find('geom[@name="head_collision"]')
+    if hc is not None:
+        sz = hc.get("size").split()
+        hc.set("size", f"{sz[0]} 0.05 {sz[2]}")
     # The real head has no roll freedom; the model's ±0.05 rad roll joint rocks it loose.
     if not KEEP_HEAD_ROLL:
         head.remove(head.find('joint[@name="head_roll_joint"]'))
@@ -209,9 +216,9 @@ class Sim:
             vx_cmd, wz_cmd = self.jump_hold, 0.
         self.vx += max(-.03, min(.03, vx_cmd - self.vx))
         self.wz += max(-.06, min(.06, wz_cmd - self.wz))
-        if self.sit and not self._sat:
-            self.enter_sit()
-        elif not self.sit and self._sat:
+        if self.sit:
+            self._sat = True
+        elif self._sat:
             self.leave_sit()
         if self.sit:
             # disabled: no policy; joints held at the folded pose (action = offset from the default / scale)
@@ -227,9 +234,11 @@ class Sim:
             a = self.delay.pop(0)
             for i, n in enumerate(ACTION_JOINTS):
                 if self.sit and n in SIT_Q:
-                    # sitting is parked: legs held folded at the limits
-                    d.qpos[self.jq[n]] = SIT_Q[n]
-                    d.qvel[self.jv[n]] = 0.
+                    # sit fold: position control to the folded pose, torque held to the actuator limits
+                    e = SIT_Q[n] - d.qpos[self.jq[n]]
+                    d.ctrl[self.ja[n]] = float(np.clip(8. * e - .2 * d.qvel[self.jv[n]], -SIT_LIM[n], SIT_LIM[n]))
+                    continue
+                if self.sit and n in ("LW", "RW"):
                     d.ctrl[self.ja[n]] = 0.
                     continue
                 damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
@@ -238,8 +247,6 @@ class Sim:
                 hr = "head_roll_joint"
                 d.ctrl[self.ja[hr]] = torque(hr, d.qpos[self.jq[hr]], d.qvel[self.jv[hr]], 0.)
             mujoco.mj_step(self.m, d)
-            if self.sit:
-                self._level(d)
         self.last = act
         self.update_rig()
         mujoco.mj_forward(self.m, d)

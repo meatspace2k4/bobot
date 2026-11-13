@@ -164,6 +164,29 @@ class KeyboardSource:
         return f"arrows  thr {self.thr:+.2f}  yaw {self.yaw:+.2f}" + ("" if self.front else "  (click the window)")
 
 
+class PostureSource:
+    """Sim-only posture scene: Beni sits (motors fold the legs) or stands (policy), sticks neutral."""
+
+    def __init__(self, sit):
+        self.sit = sit
+        self.name = "sit" if sit else "stand"
+
+    def start(self, sim):
+        self.t = 0.
+        sim.sit = self.sit
+
+    def sticks(self, sim):
+        self.t += STEP
+        sim.sit = self.sit
+        return list(NEUTRAL)
+
+    def done(self):
+        return False
+
+    def status(self):
+        return f"{self.name}  {self.t:4.1f} s"
+
+
 def active(c):
     return (abs(c[0] - 1000) > 30 or abs(c[1] - 1000) > 30 or abs(c[2] - 1000) > 30
             or (c[3] & 0x3F) != 31 or bool((c[4] >> 6) if c[4] & 32 else 0))
@@ -397,7 +420,8 @@ def run(a, ui):
     m, d = sim.m, sim.d
     boxes, box_geoms = find_boxes(m)
     cols = [("manual", [KeyboardSource()])] + capture_collections(a.traces) + [("scripted", [BoxTour(boxes)]),
-                                                                                ("live", twin_scenes(m))]
+                                                                                ("live", twin_scenes(m)),
+                                                                                ("posture", [PostureSource(True), PostureSource(False)])]
     st = dict(col=next((i for i, c in enumerate(cols) if c[0] == a.start), 0), cur=0, pending=True, toggle_head=False, toggle_arm=False)
     overlay = Overlay(sim) if ui else None
 
