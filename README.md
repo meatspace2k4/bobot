@@ -19,8 +19,8 @@ Protocol notes are in [protocol.md](protocol.md), and the topic ID table is in [
 `beni-wifi-watchdog.timer` (60 s) brings wlan0 back to home Wi-Fi whenever no relay is running.
 
 ## Fly Beni from the Mac
-Order matters: Beni only opens UDP 9007 while an app session exists.
-1. Open the Beni app, connect, and stand Beni.
+Order matters: Beni serves one UCP peer at a time.
+1. Stand Beni with the app, then take the phone off Beni's Wi-Fi (Settings → Wi-Fi off). Beni is single-peer.
 2. On the Pi, run `sudo bash /opt/beni/beni_start.sh`. It prints the tunnel URL. The bridge takes over the app's session.
 3. On the Mac, run `tools/mac/beni_pilot.py <url>`. Hold R1 to arm; Circle is the e-stop.
 4. Stop with `curl <url>/stop`.

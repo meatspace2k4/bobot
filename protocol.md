@@ -88,6 +88,8 @@ Every later envelope: `session_id[8] ‖ counter[8, BE, per direction] ‖ ciphe
 - Resolution varies with mode: 960×720 @ 25 fps in the first capture, 1920×1440 @ 60 fps via the relay.
 - Path: Pi wlan0 joins Beni (ch 153, 5 GHz, SSID broadcast). `beni_video.py --live` feeds `ffmpeg -c copy -f mpegts -listen 1 :8780`. A cloudflared quick tunnel serves it over eth0. The Mac plays it with `ffplay <trycloudflare url>`.
 - The link is single-peer: the relay displaces the phone app's session.
+- **Session lock:** Beni serves one UCP peer and refuses others (ICMP port unreachable) until that peer's session expires. Take the phone off Beni's Wi-Fi, then sync. Stick frames alone drive Beni once the session is held; the encrypted pilot-mode command is not needed (verified 22:41).
+- **Tunnel delivery:** the quick tunnel delivers the stream in 128 KiB blocks every 200–400 ms, whatever the Content-Type (A/B tested `video/hevc` vs `text/event-stream`). Beni→Pi is a steady 60 fps. The pilot absorbs this with a jitter buffer (`--buffer-ms`, default 100).
 
 ## Open
 - [ ] Pairing key: capture a re-pair (BLE + `e2e_provision` + cloud) to see where it originates
