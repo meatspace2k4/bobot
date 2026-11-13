@@ -4,14 +4,13 @@
 usage: beni_pilot.py https://<bridge>.trycloudflare.com
 
 Controls (DualSense). Stick values are passed through raw and linear, full range; the robot shapes motion itself.
-  left stick Y     throttle (forward/back)
+  left stick Y     flip direction only (no throttle)
   left stick X     steer
-  R2 / L2          throttle / reverse, used only while the left stick Y is centered
+  R2 / L2          throttle / reverse
   right stick X    head pan (ch2, confirmed 2026-11-12)
-  Cross            Rocket League: 1st press = jump (straight up, stick ignored).
-                   2nd press within 1.5 s = direction jump toward the left stick if |LX|+|LY| >= 0.5
-                   (body frame, stick up = forward, snapped to Beni's 4 flips), else double jump (= jump).
-                   Window and threshold from RLUtilities dodge.cc.
+  Cross            stick centered: jump.
+                   direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
+                   (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
   D-pad            direct flips: up = forward, down = back, left = left, right = right
   Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
@@ -35,6 +34,7 @@ DPAD_FLIPS = {B_UP: "flip_forward", B_DOWN: "flip_back", B_LEFT: "flip_left", B_
 DODGE_TIMEOUT = 1.5      # s after first jump in which a dodge is allowed
 DODGE_THRESHOLD = 0.5    # |pitch| + |yaw| + |roll| >= 0.5 -> dodge, else double jump
 DODGE_AXIS_ZERO = 0.1    # dodge_dir components below 0.1 are zeroed
+DOUBLE_TAP = 0.3         # s: 2nd Cross within this, with direction held, sends only the direction jump
 
 
 def rl_dodge(lx, ly):
@@ -180,7 +180,7 @@ def main():
     last_btn = None
     playing, next_show, buffered = False, 0.0, 0
     last_action = None
-    jump_t, dodged = None, False
+    pend_t, pend_dir = None, None
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -211,19 +211,25 @@ def main():
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
                     elif e.button == B_CROSS and js:
                         now_j = time.monotonic()
-                        if jump_t is not None and not dodged and now_j - jump_t < DODGE_TIMEOUT:
-                            a = rl_dodge(js.get_axis(A_LX), js.get_axis(A_LY)) or "jump"  # 2nd press
-                            dodged = True
+                        d = rl_dodge(js.get_axis(A_LX), js.get_axis(A_LY))
+                        if pend_t is not None and now_j - pend_t <= DOUBLE_TAP:
+                            sh.ctl["action"] = last_action = d or pend_dir  # double tap: direction jump only
+                            pend_t = None
+                        elif d:
+                            pend_t, pend_dir = now_j, d  # direction held: wait for a possible 2nd tap
                         else:
-                            a, jump_t, dodged = "jump", now_j, False  # 1st press: straight up
-                        sh.ctl["action"] = last_action = a
+                            sh.ctl["action"] = last_action = "jump"  # stick centered: jump now
+
+        if pend_t is not None and time.monotonic() - pend_t > DOUBLE_TAP:
+            with sh.lock:
+                sh.ctl["action"] = last_action = "jump"  # no 2nd tap: it was a single jump
+            pend_t = None
 
         with sh.lock:
             if test is not None:
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
-                ly = -raw(js.get_axis(A_LY))  # stick up = forward
-                t = ly if ly != 0.0 else trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))
+                t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
                 sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=raw(js.get_axis(A_RX)), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
