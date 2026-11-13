@@ -29,9 +29,9 @@ def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
-def pack(ch0, ch1, code=0):
-    v = int.from_bytes(TEMPLATE, "little") & ~((1 << 22) - 1) & ~(0x7FF << 44)
-    v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11) | (((CH4_REST | (code << 6)) & 0x7FF) << 44)
+def pack(ch0, ch1, code=0, ch2=1000):
+    v = int.from_bytes(TEMPLATE, "little") & ~((1 << 33) - 1) & ~(0x7FF << 44)
+    v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11) | ((ch2 & 0x7FF) << 22) | (((CH4_REST | (code << 6)) & 0x7FF) << 44)
     return v.to_bytes(9, "little")
 
 
@@ -51,6 +51,7 @@ class State:
         self.ctl_t = 0.0
         self.boost = False
         self.pulse_code, self.pulse_until = 0, 0.0
+        self.head = 0.0  # right stick X -> ch2 (TEST: ch2 as head pan is unconfirmed)
         self.last_action, self.action_note, self.actions = None, '', 0
         self.ch = (1000, 1000)
         self.ucp_up = False
@@ -69,7 +70,9 @@ class State:
         c0 = 1000 + int(round(max(-1.0, min(1.0, t)) * cap * 999))
         c1 = 1000 + int(round(max(-1.0, min(1.0, y)) * cap * 999))
         code = self.pulse_code if (live and time.monotonic() < self.pulse_until) else 0
-        return c0, c1, code
+        h = self.head if live else 0.0
+        c2 = 1000 + int(round(max(-1.0, min(1.0, h)) * 999))
+        return c0, c1, code, c2
 
     def apply(self, m):
         with self.lock:
@@ -77,6 +80,7 @@ class State:
             self.yaw = float(m.get("y", 0.0))
             self.arm = bool(m.get("arm", False))
             self.boost = bool(m.get("boost", False))
+            self.head = float(m.get("h", 0.0))
             a = m.get("action")
             if a:
                 self.last_action, self.actions = a, self.actions + 1
@@ -175,9 +179,9 @@ def ucp_session(st, robot, bind):
         while not st.stop.is_set():
             now = time.monotonic()
             if now >= nxt:
-                c0, c1, code = st.channels()
-                st.ch = (c0, c1, CH4_REST | (code << 6))
-                body = pack(c0, c1, code) + struct.pack("<H", ack) + b"\0" * 8
+                c0, c1, code, c2 = st.channels()
+                st.ch = (c0, c1, c2, CH4_REST | (code << 6))
+                body = pack(c0, c1, code, c2) + struct.pack("<H", ack) + b"\0" * 8
                 ts = int((now - t0) * 1e6) & 0xFFFFFFFF
                 s.send(struct.pack("<BBHHHI", 0x51, 0x10, ack, 0, 12 + len(body), ts) + body)
                 nxt += 0.02

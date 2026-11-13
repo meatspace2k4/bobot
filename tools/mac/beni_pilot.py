@@ -7,8 +7,11 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick Y     throttle (forward/back)
   left stick X     steer
   R2 / L2          throttle / reverse, used only while the left stick Y is centered
-  Cross            jump
-  D-pad            flips: up = forward, down = back, left = left, right = right
+  right stick X    head pan (TEST: mapped to ch2, unconfirmed)
+  Cross            Rocket League jump/dodge (constants from RLUtilities):
+                     1st press = jump. 2nd press within 1.5 s: if |LX|+|LY| >= 0.5 -> dodge toward the stick
+                     in Beni's body frame (stick up = front flip), snapped to Beni's 4 flips; else double jump (= jump).
+  D-pad            direct flips: up = forward, down = back, left = left, right = right
   Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
 Keyboard: Space = e-stop, C = clear, Esc = quit.
@@ -25,7 +28,27 @@ DEADZONE = 0.04  # only to kill stick drift at rest; values outside it pass thro
 # SDL2 joystick indices for DualSense
 B_CROSS, B_OPTIONS, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 6, 11, 12, 13, 14, 15
 A_LX, A_LY, A_L2, A_R2 = 0, 1, 4, 5
+A_RX = 2
 DPAD_FLIPS = {B_UP: "flip_forward", B_DOWN: "flip_back", B_LEFT: "flip_left", B_RIGHT: "flip_right"}
+# Rocket League dodge rules (RLUtilities src/mechanics/dodge.cc, src/simulation/car.cc)
+DODGE_TIMEOUT = 1.5      # s after first jump in which a dodge is allowed
+DODGE_THRESHOLD = 0.5    # |pitch| + |yaw| + |roll| >= 0.5 -> dodge, else double jump
+DODGE_AXIS_ZERO = 0.1    # dodge_dir components below 0.1 are zeroed
+
+
+def rl_dodge(lx, ly):
+    """RL dodge from left stick: dodge_dir = normalize(-pitch, yaw) in the body frame.
+    Gamepad: stick up gives pitch -1, so forward = -ly; yaw = lx. Returns Beni action or None (double jump)."""
+    if abs(lx) + abs(ly) < DODGE_THRESHOLD:
+        return None
+    fwd, right = -ly, lx
+    n = (fwd * fwd + right * right) ** 0.5
+    fwd, right = fwd / n, right / n
+    fwd = 0.0 if abs(fwd) < DODGE_AXIS_ZERO else fwd
+    right = 0.0 if abs(right) < DODGE_AXIS_ZERO else right
+    if abs(fwd) >= abs(right):  # Beni has 4 discrete flips: snap to the dominant axis
+        return "flip_forward" if fwd > 0 else "flip_back"
+    return "flip_right" if right > 0 else "flip_left"
 
 
 def trig(v):
@@ -156,6 +179,7 @@ def main():
     last_btn = None
     playing, next_show, buffered = False, 0.0, 0
     last_action = None
+    jump_t, dodged = None, False
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -184,8 +208,14 @@ def main():
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
-                    elif e.button == B_CROSS:
-                        sh.ctl["action"] = last_action = "jump"
+                    elif e.button == B_CROSS and js:
+                        now_j = time.monotonic()
+                        if jump_t is not None and now_j - jump_t < DODGE_TIMEOUT and not dodged:
+                            a = rl_dodge(js.get_axis(A_LX), js.get_axis(A_LY)) or "jump"  # None = double jump
+                            dodged = True
+                        else:
+                            a, jump_t, dodged = "jump", now_j, False
+                        sh.ctl["action"] = last_action = a
 
         with sh.lock:
             if test is not None:
@@ -193,7 +223,7 @@ def main():
             elif js:
                 ly = -raw(js.get_axis(A_LY))  # stick up = forward
                 t = ly if ly != 0.0 else trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), boost=False, cap=1.0, arm=True)
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=raw(js.get_axis(A_RX)), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
