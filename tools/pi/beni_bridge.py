@@ -16,6 +16,8 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 TEMPLATE = bytes.fromhex("e8431ffabe0f021805")  # captured neutral body, ch5=545
 VIDEO = (0x05, 0x07)
+# action -> how it is sent. Filled in from the app capture (session 5); encrypted ones can only be identified.
+ACTIONS = {}
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
@@ -43,6 +45,8 @@ class State:
         self.cap = min(0.3, max_cap)
         self.max_cap, self.deadman = max_cap, deadman
         self.ctl_t = 0.0
+        self.boost = False
+        self.last_action, self.action_note, self.actions = None, '', 0
         self.ch = (1000, 1000)
         self.ucp_up = False
         self.rx_frags = self.rx_frames = 0
@@ -55,7 +59,7 @@ class State:
     def channels(self):
         with self.lock:
             live = self.arm and not self.estop and (time.monotonic() - self.ctl_t) < self.deadman
-            cap = min(self.cap, self.max_cap)
+            cap = self.max_cap if self.boost else min(self.cap, self.max_cap)
             t, y = (self.thr, self.yaw) if live else (0.0, 0.0)
         c0 = 1000 + int(round(max(-1.0, min(1.0, t)) * cap * 999))
         c1 = 1000 + int(round(max(-1.0, min(1.0, y)) * cap * 999))
@@ -66,6 +70,12 @@ class State:
             self.thr = float(m.get("t", 0.0))
             self.yaw = float(m.get("y", 0.0))
             self.arm = bool(m.get("arm", False))
+            self.boost = bool(m.get("boost", False))
+            a = m.get("action")
+            if a:
+                self.last_action, self.actions = a, self.actions + 1
+                self.action_note = ACTIONS.get(a, "unmapped")
+                log(f"action {a}: {self.action_note}")
             if "cap" in m:
                 self.cap = max(0.0, min(float(m["cap"]), self.max_cap))
             if m.get("estop"):
@@ -83,7 +93,8 @@ class State:
                 "up_s": round(time.time() - self.t0), "ucp": self.ucp_up,
                 "fps": round(self.fps, 1), "rx_frags": self.rx_frags,
                 "ch": self.ch, "arm": self.arm, "estop": self.estop,
-                "cap": self.cap, "max_cap": self.max_cap,
+                "cap": self.cap, "max_cap": self.max_cap, "boost": self.boost,
+                "last_action": self.last_action, "action_note": self.action_note, "actions": self.actions,
                 "ctl_age_ms": int((time.monotonic() - self.ctl_t) * 1000) if self.ctl_t else None,
                 "video_clients": len(self.subs), "ws_clients": self.ws_clients,
             }

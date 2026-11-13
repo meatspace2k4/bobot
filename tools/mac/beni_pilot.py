@@ -3,14 +3,17 @@
 
 usage: beni_pilot.py https://<bridge>.trycloudflare.com [--cap 0.3]
 
-Controls (DualSense):
-  hold R1          arm (deadman; release = neutral)
-  left stick Y     throttle
-  right stick X    yaw
-  Circle           E-STOP (latched on the bridge)
+Controls (DualSense, Rocket League default layout):
+  R2 / L2          throttle / reverse (analog)
+  left stick X     steer
+  Cross            jump;  Cross with the left stick deflected = flip that way (forward/back/left/right)
+  Square (hold)    boost: speed cap jumps to the bridge's max
+  Circle (hold)    powerslide: 1.6x steer gain
+  Touchpad click   E-STOP (latched on the bridge, disarms)
   Options          clear e-stop
   D-pad up/down    speed cap +/- 10 %
 Keyboard: Space = e-stop, C = clear, Esc = quit.
+No arming step: sticks are live while the controller is connected. Link loss (>300 ms) -> neutral on the bridge.
 
 Test without hardware: --headless --test-input "t=0.5,y=0,arm=1" --seconds 8
 """
@@ -21,14 +24,31 @@ os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 W, H = 960, 720
 DEADZONE = 0.08
 # SDL2 joystick indices for DualSense
-B_CROSS, B_CIRCLE, B_OPTIONS, B_R1, B_UP, B_DOWN = 0, 1, 6, 10, 11, 12
-A_LY, A_RX = 1, 2
+B_CROSS, B_CIRCLE, B_SQUARE, B_CREATE, B_OPTIONS, B_UP, B_DOWN, B_TOUCH = 0, 1, 2, 4, 6, 11, 12, 15
+A_LX, A_LY, A_L2, A_R2 = 0, 1, 4, 5
+FLIP_THRESHOLD = 0.5
+POWERSLIDE_GAIN = 1.6
+
+
+def trig(v):
+    """DualSense trigger axis rests at -1, full press +1 -> 0..1 with a small deadzone."""
+    x = (v + 1.0) / 2.0
+    return 0.0 if x < 0.05 else min(1.0, (x - 0.05) / 0.95)
+
+
+def flip_dir(lx, ly):
+    if max(abs(lx), abs(ly)) < FLIP_THRESHOLD:
+        return "jump"
+    if abs(ly) >= abs(lx):
+        return "flip_forward" if ly < 0 else "flip_back"
+    return "flip_right" if lx > 0 else "flip_left"
 
 
 class Shared:
     def __init__(self, cap):
         self.lock = threading.Lock()
-        self.ctl = {"t": 0.0, "y": 0.0, "arm": False, "cap": cap, "estop": False, "clear": False}
+        self.ctl = {"t": 0.0, "y": 0.0, "arm": False, "cap": cap, "estop": False, "clear": False,
+                    "boost": False, "action": None}
         self.status = {}
         self.ws_up = False
         self.frame = None
@@ -90,7 +110,8 @@ def ws_thread(sh, url):
                     while not sh.quit.is_set() and not rt.done():
                         with sh.lock:
                             msg = dict(sh.ctl)
-                            sh.ctl["clear"] = False  # one-shot
+                            sh.ctl["clear"] = False  # one-shots
+                            sh.ctl["action"] = None
                         await ws.send(json.dumps(msg))
                         await asyncio.sleep(1 / 30)
                     rt.cancel()
@@ -139,6 +160,7 @@ def main():
     end = time.monotonic() + args.seconds if args.seconds else None
     last_btn = None
     playing, next_show, buffered = False, 0.0, 0
+    last_action = None
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -161,7 +183,7 @@ def main():
             elif e.type == pygame.JOYBUTTONDOWN:
                 last_btn = e.button
                 with sh.lock:
-                    if e.button == B_CIRCLE:
+                    if e.button == B_TOUCH:
                         sh.ctl["estop"] = True
                     elif e.button == B_OPTIONS:
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
@@ -169,12 +191,17 @@ def main():
                         sh.ctl["cap"] = round(min(1.0, sh.ctl["cap"] + 0.1), 2)
                     elif e.button == B_DOWN:
                         sh.ctl["cap"] = round(max(0.1, sh.ctl["cap"] - 0.1), 2)
+                    elif e.button == B_CROSS and js:
+                        sh.ctl["action"] = last_action = flip_dir(js.get_axis(A_LX), js.get_axis(A_LY))
 
         with sh.lock:
             if test is not None:
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
-                sh.ctl.update(t=-dz(js.get_axis(A_LY)), y=dz(js.get_axis(A_RX)), arm=bool(js.get_button(B_R1)))
+                gain = POWERSLIDE_GAIN if js.get_button(B_CIRCLE) else 1.0
+                sh.ctl.update(t=trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)),
+                              y=max(-1.0, min(1.0, dz(js.get_axis(A_LX)) * gain)),
+                              boost=bool(js.get_button(B_SQUARE)), arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
@@ -207,9 +234,11 @@ def main():
         lines = [
             f"link {'UP' if sh.ws_up else 'DOWN'}  ucp {'up' if st.get('ucp') else 'down'}  "
             f"video {sh.vfps:4.1f} fps (beni {st.get('fps', 0)})  buf {buffered}  ctl age {st.get('ctl_age_ms')} ms",
-            f"{'E-STOP (Options to clear)' if st.get('estop') else ('ARMED' if armed else 'disarmed (hold R1)')}"
+            f"{'E-STOP (Options to clear)' if st.get('estop') else ('LIVE' if armed else 'no controller')}"
+            f"{'  BOOST' if ctl.get('boost') else ''}"
             f"   cap {ctl['cap']:.0%} (max {st.get('max_cap', 0):.0%})   ch {st.get('ch')}"
             f"   pad {'ok' if js else 'NONE'}  btn {last_btn}",
+            f"last action {last_action}  bridge: {st.get('last_action')} ({st.get('action_note', '')})",
         ]
         color = (255, 60, 60) if st.get("estop") else ((60, 220, 90) if armed else (230, 230, 230))
         for i, s in enumerate(lines):
