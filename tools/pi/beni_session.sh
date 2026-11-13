@@ -1,16 +1,8 @@
 #!/bin/bash
-# Run as root by beni_start.sh (systemd unit beni-bridge). Join Beni on wlan0, run the bridge, restore home Wi-Fi on exit.
+# Run as root by beni_start.sh (systemd unit beni-bridge). Join Beni on wlan0, run the bridge, leave Beni on exit (wlan0 failover: watchdog).
 SSID="${BENI_SSID:-Beni-206391}"; HOME_NET="${HOME_SSID:-Beeman}"
 : "${BENI_PSK:?BENI_PSK missing from /opt/beni/beni.env}"
-cleanup(){
-  nmcli con delete "$SSID" >/dev/null 2>&1
-  for i in 1 2 3 4 5; do
-    nmcli dev wifi rescan >/dev/null 2>&1; sleep 3
-    nmcli con up "$HOME_NET" ifname wlan0 >/dev/null 2>&1 && { echo "restored $HOME_NET"; return; }
-    echo "restore attempt $i failed"; sleep 7
-  done
-  echo "restore failed; beni-wifi-watchdog.timer will retry"
-}
+cleanup(){ nmcli con delete "$SSID" >/dev/null 2>&1; echo "left Beni; wlan0 failover is beni-wifi-watchdog.timer's job"; }
 trap cleanup EXIT
 trap 'exit 0' TERM INT
 nmcli con delete "$SSID" >/dev/null 2>&1

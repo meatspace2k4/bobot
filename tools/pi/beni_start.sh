@@ -11,5 +11,4 @@ URL=$(journalctl -u beni-cf -n 200 --no-pager | grep -oE 'https://[a-z0-9-]+\.tr
 echo "URL: $URL"
 systemd-run --unit beni-bridge -p EnvironmentFile=/opt/beni/beni.env -p RuntimeMaxSec=3600 \
   -p ExecStopPost="-/usr/bin/nmcli con delete ${BENI_SSID:-Beni-206391}" \
-  -p ExecStopPost="-/usr/bin/nmcli con up ${HOME_SSID:-Beeman}" \
   /opt/beni/beni_session.sh && echo "BRIDGE STARTED - Pi Wi-Fi moves to Beni; control it via $URL/status and $URL/stop"

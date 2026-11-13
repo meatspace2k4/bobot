@@ -16,11 +16,11 @@ Protocol notes are in [protocol.md](protocol.md), and the topic ID table is in [
 
 ## Control path to the Pi
 `ssh jpark@192.168.10.218`: the Asus WAN forwards port 22 to the Pi's eth0. This works wherever wlan0 is. Replies from 10.0.0.2 are pinned to eth0 by a source-routing rule (table 100) on "Wired connection 1".
-`beni-wifi-watchdog.timer` (60 s) brings wlan0 back to home Wi-Fi whenever no relay is running.
+wlan0 is failover only: `beni-wifi-watchdog.timer` (60 s) brings up home Wi-Fi only when eth0 is down or can't reach out, and releases it when eth0 is healthy. Beeman is `autoconnect no`.
 
 ## Fly Beni from the Mac
 Order matters: Beni serves one UCP peer at a time.
-1. Stand Beni with the app, then take the phone off Beni's Wi-Fi (Settings → Wi-Fi off). Beni is single-peer.
+1. Stand Beni with the remote. The phone must not be on Beni's Wi-Fi (Beni serves one peer).
 2. On the Pi, run `sudo bash /opt/beni/beni_start.sh`. It prints the tunnel URL. The bridge takes over the app's session.
 3. On the Mac, run `tools/mac/beni_pilot.py <url>`. Hold R1 to arm; Circle is the e-stop.
 4. Stop with `curl <url>/stop`.
