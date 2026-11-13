@@ -42,10 +42,12 @@ Jump and flips are not encrypted. They ride in the 50 Hz stick frame as a ~190 m
 | action | code | ch4 |
 |---|---|---|
 | jump | 1 | 96 |
-| flip forward | 4 | 288 |
-| flip back | 6 | 416 |
-| flip left | 8 | 544 |
-| flip right | 2 | 160 |
+| flip back | 4 | 288 |
+| flip left | 6 | 416 |
+| flip right | 8 | 544 |
+| flip forward | 2 | 160 |
+
+Order confirmed by the operator: jump, then back, left, right, forward.
 
 - The first jump drew a robot `device/status/rc/fsm_state` push (tag 0x5a) about 50 ms later.
 - No encrypted 0x0d message accompanied any action; only the periodic ping and timer were seen.

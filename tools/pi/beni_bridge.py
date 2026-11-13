@@ -18,7 +18,7 @@ TEMPLATE = bytes.fromhex("e8431ffabe0f021805")  # captured neutral body, ch5=545
 VIDEO = (0x05, 0x07)
 # Actions are cleartext: a ~190 ms pulse on ch4 (rest 32) with a code in bits 6..9: ch4 = 32 | code << 6.
 # Mapped from the app capture 2026-11-12 22:54 (captures/beni-actions.pcap).
-ACTION_CODES = {"jump": 1, "flip_forward": 4, "flip_back": 6, "flip_left": 8, "flip_right": 2}
+ACTION_CODES = {"jump": 1, "flip_back": 4, "flip_left": 6, "flip_right": 8, "flip_forward": 2}
 ACTIONS = {k: f"ch4 code {v}" for k, v in ACTION_CODES.items()}
 PULSE_S = 0.19
 CH4_REST = 32
