@@ -7,12 +7,14 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick Y     flip direction only (no throttle)
   left stick X     steer
   R2 / L2          throttle / reverse
-  right stick      head yaw follows stick ANGLE (9:00 = look left, 6:00 = look behind; unwrapped, holds behind)
+  right stick      head yaw follows stick ANGLE (9:00 = look left, 6:00 = look behind; unwrapped, holds behind);
+                   a push that starts straight back only tilts (no yaw) until the stick recenters
                    right stick Y also tilts: forward = look down, back = look up (ch3 low 6 bits)
                    both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
+  Triangle         camera lock: releasing the right stick holds the head's aim instead of re-centering (--cam-lock toggle|hold)
   D-pad            direct flips: up = forward, down = back, left = left, right = right
   Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
@@ -28,7 +30,7 @@ os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 W, H = 960, 720
 DEADZONE = 0.04  # only to kill stick drift at rest; values outside it pass through unscaled
 # SDL2 joystick indices for DualSense
-B_CROSS, B_OPTIONS, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 6, 11, 12, 13, 14, 15
+B_CROSS, B_TRIANGLE, B_OPTIONS, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 3, 6, 11, 12, 13, 14, 15
 A_LX, A_LY, A_L2, A_R2 = 0, 1, 4, 5
 A_RX, A_RY = 2, 3
 DPAD_FLIPS = {B_UP: "flip_forward", B_DOWN: "flip_back", B_LEFT: "flip_left", B_RIGHT: "flip_right"}
@@ -73,16 +75,21 @@ class StickYaw:
     def __init__(self):
         self.theta = 0.0   # unwrapped degrees
         self.active = False
+        self.tilt_only = False
 
     def step(self, rx, ry, expo):
         import math
         mag = min(1.0, math.hypot(rx, ry))
         if mag < DEADZONE:
-            self.active, self.theta = False, 0.0
+            self.active, self.theta, self.tilt_only = False, 0.0, False
             return 0.0
         a = math.degrees(math.atan2(rx, -ry))
         if not self.active:
-            self.theta, self.active = a, True
+            self.active = True
+            self.tilt_only = abs(rx) < DEADZONE and ry > 0  # started straight back: tilt only, no yaw
+            self.theta = 0.0 if self.tilt_only else a
+        if self.tilt_only:
+            return 0.0
         else:
             d = (a - self.theta + 180.0) % 360.0 - 180.0
             self.theta = max(-180.0, min(180.0, self.theta + d))
@@ -182,6 +189,7 @@ def main():
     a.add_argument("url")
     a.add_argument("--cap", type=float, default=1.0)
     a.add_argument("--head-expo", type=float, default=4.0, help="right-stick head pan curve (1 = linear)")
+    a.add_argument("--cam-lock", choices=["toggle", "hold"], default=os.environ.get("CAM_LOCK", "toggle"), help="Triangle camera lock: toggle or hold")
     a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')
@@ -214,6 +222,7 @@ def main():
     last_action = None
     pend_t, pend_dir = None, None
     yaw = StickYaw()
+    cam_locked, head_hv = False, (0.0, 0.0)
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -240,6 +249,8 @@ def main():
                         sh.ctl["estop"] = True
                     elif e.button == B_OPTIONS:
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
+                    elif e.button == B_TRIANGLE and args.cam_lock == "toggle":
+                        cam_locked = not cam_locked
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
                     elif e.button == B_CROSS and js:
@@ -263,7 +274,11 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo), v=-head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
+                locked = cam_locked if args.cam_lock == "toggle" else bool(js.get_button(B_TRIANGLE))
+                rx_, ry_ = raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY))
+                if (rx_, ry_) != (0.0, 0.0) or not locked:  # locked: stick still works; release holds last aim
+                    head_hv = (yaw.step(rx_, ry_, args.head_expo), -head_curve(ry_, args.head_expo))
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_hv[0], v=head_hv[1], boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
