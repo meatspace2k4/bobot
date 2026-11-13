@@ -5,7 +5,7 @@ usage: beni_pilot.py https://<bridge>.trycloudflare.com
 
 Controls (DualSense). Stick values are passed through raw and linear, full range; the robot shapes motion itself.
   left stick Y     throttle (forward/back)
-  left stick X     steer
+  left stick X     steer (inverted while reversing, so reverse steers like a car / Rocket League)
   R2 / L2          throttle / reverse, used only while the left stick Y is centered
   right stick X    head pan (ch2, confirmed 2026-11-12)
   Cross            Rocket League: 1st press = jump (straight up, stick ignored).
@@ -224,7 +224,10 @@ def main():
             elif js:
                 ly = -raw(js.get_axis(A_LY))  # stick up = forward
                 t = ly if ly != 0.0 else trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=raw(js.get_axis(A_RX)), boost=False, cap=1.0, arm=True)
+                y = raw(js.get_axis(A_LX))
+                if t < 0:
+                    y = -y  # car-like reverse: Beni's ch1 is a yaw rate, so invert steer when backing up
+                sh.ctl.update(t=t, y=y, h=raw(js.get_axis(A_RX)), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
