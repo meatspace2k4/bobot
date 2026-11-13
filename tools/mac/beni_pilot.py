@@ -11,7 +11,8 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   right stick      one mode per push: starts within 30 deg of 12:00/6:00 = tilt only (forward = look down,
                    back = look up); outside that wedge = yaw only, following the stick angle (9:00 = look left,
                    6:00 = look behind, unwrapped, holds behind). No tilt while turning.
-  R3 (click)       toggle look lock: head yaw freezes where it is; right stick up/down still tilts
+  R3 (click)       toggle look lock: head yaw freezes where it is; right stick up/down still tilts;
+                   moving the right stick sideways (out of the up/down wedge) unlatches it
                    both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
@@ -24,7 +25,7 @@ Sticks are live while the controller is connected. Link loss (>300 ms) -> neutra
 
 Test without hardware: --headless --test-input "t=0.5,y=0,arm=1" --seconds 8
 """
-import argparse, asyncio, collections, json, os, subprocess, threading, time
+import argparse, asyncio, collections, json, math, os, subprocess, threading, time
 
 os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
@@ -281,6 +282,7 @@ def main():
                 js = None
             elif e.type == pygame.JOYBUTTONDOWN:
                 last_btn = e.button
+                print(f"button {e.button}", flush=True)
                 with sh.lock:
                     if e.button == B_TOUCH:
                         sh.ctl["estop"] = True
@@ -314,8 +316,11 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = drive.step(trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)), dt_loop)
+                rx_l, ry_l = raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY))
+                if look_lock and math.hypot(rx_l, ry_l) >= DEADZONE and not yaw._in_wedge(math.degrees(math.atan2(rx_l, -ry_l))):
+                    look_lock = False  # sideways stick input unlatches the look lock
                 if look_lock:  # yaw frozen; right stick up/down still tilts
-                    head_hv = (locked_h, -head_curve(raw(js.get_axis(A_RY)), args.head_expo))
+                    head_hv = (locked_h, -head_curve(ry_l, args.head_expo))
                 else:
                     head_hv = yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo)
                 sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_hv[0], v=head_hv[1], boost=False, cap=1.0, arm=True)
