@@ -11,8 +11,8 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   right stick      one mode per push: starts within 30 deg of 12:00/6:00 = tilt only (forward = look down,
                    back = look up); outside that wedge = yaw only, following the stick angle (9:00 = look left,
                    6:00 = look behind, unwrapped, holds behind). No tilt while turning.
-  R3 (click)       toggle look lock: head yaw freezes where it is; right stick up/down still tilts;
-                   moving the right stick sideways (out of the up/down wedge) unlatches it
+  R3 (click)       toggle look lock: yaw freezes where the head points (works mid-turn); up/down still tilts.
+                   After the stick is released or in the up/down wedge, the next sideways push unlatches it.
                    both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
@@ -131,6 +131,39 @@ class RLDrive:
             return 0.0
         self.v = max(-self.VMAX, min(self.VMAX, v + u * max(0.0, self.FORCE - abs(v)) * dt))
         return u
+
+
+class LookController:
+    """Right stick -> head, plus R3 look lock.
+    - Unlocked: StickYaw (tilt-only wedge at 12:00/6:00, yaw elsewhere, no tilt while turning).
+    - toggle(): R3. Locking freezes yaw at the head's current aim (works mid-turn with the stick held).
+    - Locked: right stick up/down still tilts. The lock arms for unlatching once the stick has been
+      released or sits in the up/down wedge; after that, the next sideways push unlatches it and
+      normal yaw takes over from that push."""
+    def __init__(self):
+        self.yaw = StickYaw()
+        self.locked, self.armed, self.lock_h = False, False, 0.0
+        self.last = (0.0, 0.0)
+
+    def toggle(self):
+        self.locked = not self.locked
+        self.armed, self.lock_h = False, self.last[0]
+
+    def step(self, rx, ry, expo):
+        import math
+        if self.locked:
+            mag = math.hypot(rx, ry)
+            sideways = mag >= DEADZONE and not self.yaw._in_wedge(math.degrees(math.atan2(rx, -ry)))
+            if not sideways:
+                self.armed = True
+            elif self.armed:
+                self.locked = False
+                self.yaw = StickYaw()          # fresh gesture: yaw follows this push
+        if self.locked:
+            self.last = (self.lock_h, -head_curve(ry, expo))
+        else:
+            self.last = self.yaw.step(rx, ry, expo)
+        return self.last
 
 
 def raw(v):
@@ -260,7 +293,7 @@ def main():
     yaw = StickYaw()
     t_prev = time.monotonic()
     drive = RLDrive()
-    head_hv, look_lock, locked_h = (0.0, 0.0), False, 0.0
+    head_hv, look = (0.0, 0.0), LookController()
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -289,8 +322,7 @@ def main():
                     elif e.button == B_OPTIONS:
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
                     elif e.button == B_R3:
-                        look_lock = not look_lock
-                        locked_h = head_hv[0]  # freeze yaw where it is
+                        look.toggle()
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
                     elif e.button == B_CROSS and js:
@@ -316,13 +348,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = drive.step(trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)), dt_loop)
-                rx_l, ry_l = raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY))
-                if look_lock and math.hypot(rx_l, ry_l) >= DEADZONE and not yaw._in_wedge(math.degrees(math.atan2(rx_l, -ry_l))):
-                    look_lock = False  # sideways stick input unlatches the look lock
-                if look_lock:  # yaw frozen; right stick up/down still tilts
-                    head_hv = (locked_h, -head_curve(ry_l, args.head_expo))
-                else:
-                    head_hv = yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo)
+                head_hv = look.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo)
                 sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_hv[0], v=head_hv[1], boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
