@@ -17,5 +17,5 @@ for i in $(seq 1 25); do
   case "$BIP" in 192.168.7.*) break;; esac; sleep 1
 done
 case "$BIP" in 192.168.7.*) echo "wlan0=$BIP";; *) echo "no Beni IP"; exit 3;; esac
-python3 -I /opt/beni/beni_bridge.py --bind "$BIP" --max-cap "${MAX_CAP:-0.5}" &
+python3 -I /opt/beni/beni_bridge.py --bind "$BIP" --max-cap "${MAX_CAP:-1.0}" &
 wait $!

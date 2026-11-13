@@ -130,7 +130,7 @@ def dz(v):
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("url")
-    a.add_argument("--cap", type=float, default=0.3)
+    a.add_argument("--cap", type=float, default=1.0)
     a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')

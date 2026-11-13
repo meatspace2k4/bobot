@@ -46,7 +46,7 @@ class State:
         self.lock = threading.Lock()
         self.thr = self.yaw = 0.0
         self.arm = self.estop = False
-        self.cap = min(0.3, max_cap)
+        self.cap = max_cap
         self.max_cap, self.deadman = max_cap, deadman
         self.ctl_t = 0.0
         self.boost = False
@@ -375,7 +375,7 @@ def main():
     a.add_argument("--robot", default="192.168.7.1:9007")
     a.add_argument("--bind", help="local IP on Beni's AP (wlan0)")
     a.add_argument("--port", type=int, default=8780)
-    a.add_argument("--max-cap", type=float, default=0.5, help="hard ceiling on |stick| fraction")
+    a.add_argument("--max-cap", type=float, default=1.0, help="hard ceiling on |stick| fraction (1.0 = full 1..1999)")
     a.add_argument("--deadman", type=float, default=0.3, help="seconds without ctl before neutral")
     args = a.parse_args()
     host, port = args.robot.rsplit(":", 1)

@@ -10,7 +10,7 @@ sudo install -d -m 755 /opt/beni
 cd /tmp && sudo install -m 755 beni_start.sh beni_session.sh /opt/beni/ && sudo install -m 644 beni_bridge.py cf-empty.yml beni.env.example /opt/beni/
 if ! sudo test -f /opt/beni/beni.env; then
   read -rsp "Beni Wi-Fi password: " PSK; echo
-  printf "BENI_SSID=Beni-206391\nBENI_PSK=%s\nHOME_SSID=Beeman\nMAX_CAP=0.5\n" "$PSK" | sudo install -m 600 /dev/stdin /opt/beni/beni.env
+  printf "BENI_SSID=Beni-206391\nBENI_PSK=%s\nHOME_SSID=Beeman\nMAX_CAP=1.0\n" "$PSK" | sudo install -m 600 /dev/stdin /opt/beni/beni.env
   unset PSK
 fi
 rm -f /tmp/beni_start.sh /tmp/beni_session.sh /tmp/beni_bridge.py /tmp/cf-empty.yml /tmp/beni.env.example /tmp/beni_join_stream.sh /tmp/pi_tunnel_relay.sh /tmp/pi_relay.sh /tmp/beni_video.py /tmp/beni_url.txt
