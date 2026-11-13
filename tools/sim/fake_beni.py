@@ -46,8 +46,9 @@ def main():
                     ctl_frames += 1
                     v = int.from_bytes(p[12:21], "little")
                     ch = (v & 0x7FF, (v >> 11) & 0x7FF)
+                    ch = ch + ((v >> 44) & 0x7FF,)
                     if ch != last_ch:
-                        print(f"{time.strftime('%H:%M:%S')} sticks ch0={ch[0]} ch1={ch[1]}  (ctl frames {ctl_frames})", flush=True)
+                        print(f"{time.strftime('%H:%M:%S')} sticks ch0={ch[0]} ch1={ch[1]} ch4={ch[2]}  (ctl frames {ctl_frames})", flush=True)
                         last_ch = ch
                 s.settimeout(0 if peer else 0.5)
         except (socket.timeout, BlockingIOError):

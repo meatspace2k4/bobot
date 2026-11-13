@@ -16,8 +16,12 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 TEMPLATE = bytes.fromhex("e8431ffabe0f021805")  # captured neutral body, ch5=545
 VIDEO = (0x05, 0x07)
-# action -> how it is sent. Filled in from the app capture (session 5); encrypted ones can only be identified.
-ACTIONS = {}
+# Actions are cleartext: a ~190 ms pulse on ch4 (rest 32) with a code in bits 6..9: ch4 = 32 | code << 6.
+# Mapped from the app capture 2026-11-12 22:54 (captures/beni-actions.pcap).
+ACTION_CODES = {"jump": 1, "flip_forward": 4, "flip_back": 6, "flip_left": 8, "flip_right": 2}
+ACTIONS = {k: f"ch4 code {v}" for k, v in ACTION_CODES.items()}
+PULSE_S = 0.19
+CH4_REST = 32
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
@@ -25,9 +29,9 @@ def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
-def pack(ch0, ch1):
-    v = int.from_bytes(TEMPLATE, "little") & ~((1 << 22) - 1)
-    v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11)
+def pack(ch0, ch1, code=0):
+    v = int.from_bytes(TEMPLATE, "little") & ~((1 << 22) - 1) & ~(0x7FF << 44)
+    v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11) | (((CH4_REST | (code << 6)) & 0x7FF) << 44)
     return v.to_bytes(9, "little")
 
 
@@ -46,6 +50,7 @@ class State:
         self.max_cap, self.deadman = max_cap, deadman
         self.ctl_t = 0.0
         self.boost = False
+        self.pulse_code, self.pulse_until = 0, 0.0
         self.last_action, self.action_note, self.actions = None, '', 0
         self.ch = (1000, 1000)
         self.ucp_up = False
@@ -63,7 +68,8 @@ class State:
             t, y = (self.thr, self.yaw) if live else (0.0, 0.0)
         c0 = 1000 + int(round(max(-1.0, min(1.0, t)) * cap * 999))
         c1 = 1000 + int(round(max(-1.0, min(1.0, y)) * cap * 999))
-        return c0, c1
+        code = self.pulse_code if (live and time.monotonic() < self.pulse_until) else 0
+        return c0, c1, code
 
     def apply(self, m):
         with self.lock:
@@ -75,6 +81,8 @@ class State:
             if a:
                 self.last_action, self.actions = a, self.actions + 1
                 self.action_note = ACTIONS.get(a, "unmapped")
+                if a in ACTION_CODES and not self.estop:
+                    self.pulse_code, self.pulse_until = ACTION_CODES[a], time.monotonic() + PULSE_S
                 log(f"action {a}: {self.action_note}")
             if "cap" in m:
                 self.cap = max(0.0, min(float(m["cap"]), self.max_cap))
@@ -167,9 +175,9 @@ def ucp_session(st, robot, bind):
         while not st.stop.is_set():
             now = time.monotonic()
             if now >= nxt:
-                c0, c1 = st.channels()
-                st.ch = (c0, c1)
-                body = pack(c0, c1) + struct.pack("<H", ack) + b"\0" * 8
+                c0, c1, code = st.channels()
+                st.ch = (c0, c1, CH4_REST | (code << 6))
+                body = pack(c0, c1, code) + struct.pack("<H", ack) + b"\0" * 8
                 ts = int((now - t0) * 1e6) & 0xFFFFFFFF
                 s.send(struct.pack("<BBHHHI", 0x51, 0x10, ack, 0, 12 + len(body), ts) + body)
                 nxt += 0.02
