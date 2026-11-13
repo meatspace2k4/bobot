@@ -8,7 +8,7 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick X     steer
   R2 / L2          throttle / reverse
   right stick X    head pan (ch2); right stick Y: forward = look down, back = look up (ch3 low 6 bits)
-                   both with expo curve --head-expo (default 2.5)
+                   both with expo (--head-expo 2.5) and an acceleration curve (--head-speed 1.5/s, --head-accel 4/s^2)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
@@ -62,6 +62,20 @@ def trig(v):
 def head_curve(v, expo):
     """Head pan response: |v|^expo keeps full range at full deflection, finer near center."""
     return (abs(v) ** expo) * (1 if v >= 0 else -1)
+
+
+class Slew:
+    """Head command follows the stick target with capped speed and acceleration (camera-style ease in/out)."""
+    def __init__(self, vmax, accel, k=6.0):
+        self.pos = self.vel = 0.0
+        self.vmax, self.accel, self.k = vmax, accel, k
+
+    def step(self, target, dt):
+        want = max(-self.vmax, min(self.vmax, (target - self.pos) * self.k))
+        dv = max(-self.accel * dt, min(self.accel * dt, want - self.vel))
+        self.vel += dv
+        self.pos = max(-1.0, min(1.0, self.pos + self.vel * dt))
+        return self.pos
 
 
 def raw(v):
@@ -157,6 +171,8 @@ def main():
     a.add_argument("url")
     a.add_argument("--cap", type=float, default=1.0)
     a.add_argument("--head-expo", type=float, default=2.5, help="right-stick head pan curve (1 = linear)")
+    a.add_argument("--head-speed", type=float, default=1.5, help="max head command speed (full range units/s)")
+    a.add_argument("--head-accel", type=float, default=4.0, help="head command acceleration (units/s^2)")
     a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')
@@ -188,6 +204,8 @@ def main():
     playing, next_show, buffered = False, 0.0, 0
     last_action = None
     pend_t, pend_dir = None, None
+    pan, tilt = Slew(args.head_speed, args.head_accel), Slew(args.head_speed, args.head_accel)
+    t_prev = time.monotonic()
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -227,6 +245,8 @@ def main():
                         else:
                             sh.ctl["action"] = last_action = "jump"  # stick centered: jump now
 
+        now_l = time.monotonic()
+        dt_loop, t_prev = min(0.1, now_l - t_prev), now_l
         if pend_t is not None and time.monotonic() - pend_t > DOUBLE_TAP:
             with sh.lock:
                 sh.ctl["action"] = last_action = "jump"  # no 2nd tap: it was a single jump
@@ -237,7 +257,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), v=-head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=pan.step(head_curve(raw(js.get_axis(A_RX)), args.head_expo), dt_loop), v=tilt.step(-head_curve(raw(js.get_axis(A_RY)), args.head_expo), dt_loop), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
