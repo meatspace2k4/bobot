@@ -144,6 +144,11 @@ def build_xml(root_dir: Path) -> str:
         mk = ET.SubElement(wb, "body", name=f"twin_mark{i}", mocap="true", pos="0 0 -5")
         ET.SubElement(mk, "geom", name=f"twin_mark{i}", type="box", size=".1 .1 .1", rgba=".2 .8 1 .45",
                       contype="0", conaffinity="0")
+    # The model's head collision box overlaps the folded legs when sitting; the real head never touches the legs
+    # and turns freely, so head-leg contacts are excluded.
+    contact = root.find("contact") if root.find("contact") is not None else ET.SubElement(root, "contact")
+    for leg in ("L1_Link", "L2_Link", "LW_Link", "R1_Link", "R2_Link", "RW_Link"):
+        ET.SubElement(contact, "exclude", body1="head", body2=leg)
     from viewer_ui import dress_scene
     dress_scene(root)
     return ET.tostring(root, encoding="unicode")
@@ -262,10 +267,12 @@ class Sim:
             # sitting is Beni's disabled state: no policy (the legs are driven to the pose below)
             act = np.zeros(len(ACTION_JOINTS), np.float32)
         else:
-            act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw)[None], "h_in": self.h})
+            act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw or 0.)[None], "h_in": self.h})
             act = act[0].astype(np.float32)
         # The public policy has no reward on its gimbal input; head yaw follows ch2 directly.
-        if self.head_override:
+        # gimbal_yaw None: the real head's position is unknown, so the sim head is not driven anywhere.
+        head_free = gimbal_yaw is None
+        if self.head_override and not head_free:
             act[6] = gimbal_yaw / SCALE["head_yaw_joint"]
         for _ in range(DECIMATION):
             self.delay.append(act)
@@ -279,8 +286,8 @@ class Sim:
                     lim = MOTOR[n].get("sim_lim", MOTOR[n]["lim"])
                     d.ctrl[self.ja[n]] = max(-lim, min(lim, LEG_KV * (w - d.qvel[self.jv[n]])))
                     continue
-                if self.sit and n in ("LW", "RW"):
-                    d.ctrl[self.ja[n]] = 0.         # disabled: wheels unpowered
+                if (self.sit and n in ("LW", "RW")) or (head_free and n == "head_yaw_joint"):
+                    d.ctrl[self.ja[n]] = 0.         # disabled: wheels unpowered; unknown head: not driven
                     continue
                 damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
                 d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)

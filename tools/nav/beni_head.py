@@ -9,9 +9,11 @@ class HeadModel:
     RATE = math.radians(225.0)   # rad/s at full stick; + = left (ch2 low)
     LIM = 5.3                    # rad, head yaw range in the policy's training states
 
-    def __init__(self):
-        self.q = 0.0
+    def __init__(self, q=0.0):
+        self.q = q          # None = unknown: nothing measures the real head; only a posture command centres it
 
     def step(self, u, dt):
+        if self.q is None:
+            return None
         self.q = max(-self.LIM, min(self.LIM, self.q + u * self.RATE * dt))
         return self.q

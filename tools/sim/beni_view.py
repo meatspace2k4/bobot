@@ -318,7 +318,9 @@ class Overlay:
         right = "\n".join(["", "", f"{ch[0]:4d}", f"{ch[1]:4d}", f"{ch[2]:4d}", f"{ch[3] & 0x3F:4d}",
                            f"{ch[4]:4d}  {act}", f"{ch[5]:4d}", "", f"{vx:+.2f} m/s", f"{wz:+.2f} rad/s", "",
                            f"{spd:+.2f} m/s", f"{d.qvel[5]:+.2f} rad/s", f"{math.degrees(hdg):+5.0f} deg",
-                           f"{d.qpos[2]:.3f} m", f"{math.degrees(d.qpos[sim.jq['head_yaw_joint']]):+5.0f} deg"])
+                           f"{d.qpos[2]:.3f} m",
+                           "unknown (waiting for centre)" if sim.head.q is None
+                           else f"{math.degrees(d.qpos[sim.jq['head_yaw_joint']]):+5.0f} deg"])
         tabs_c = "   ".join(f"[{n}]" if i == col else n for i, (n, _) in enumerate(cols))
         scenes = cols[col][1]
         tabs_s = "   ".join(f"[{x.name}]" if i == cur else x.name for i, x in enumerate(scenes))
@@ -478,7 +480,7 @@ def run(a, ui):
                 with v.lock():
                     on = src.set_armed(not src.armed)
                 print("ARMED: arrow keys drive the real Beni" if on else "disarmed", flush=True)
-        acc = min(acc + now - last, 0.1)  # real time; drop backlog beyond 100 ms
+        acc += now - last  # real time, all of it: the sim keeps the real robot's clock
         last = now
         if st["pending"]:
             st["pending"] = False

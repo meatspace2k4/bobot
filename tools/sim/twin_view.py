@@ -88,6 +88,7 @@ class TwinSource:
     def start(self, sim):
         self.t = 0.0
         sim.reset(sitting=True)  # the real Beni is sitting (disabled) when the twin starts: the sim starts sitting
+        sim.head.q = None        # the real head's position is unknown until the real robot centres it (ch5 554)
         self.srv.reset()
         self.set_armed(self.drive)
         if self.kb:

@@ -30,6 +30,8 @@ ap.add_argument("--sit", action="store_true", help="issue the sit command first,
 ap.add_argument("--scan-only", action="store_true", help="head-sweep scan and map, then stop (no driving)")
 ap.add_argument("--keep", help="URL of a bridge to hold open unarmed (keeps the root bridge and its Wi-Fi alive)")
 a = ap.parse_args()
+if not (a.stand or a.standing):
+    a.sit = True    # the first command is the sit: it centres the head, whose position is unknown until then
 
 tour = RgbBoxTour(a.hfov, a.cam_h, a.vmax, spin=a.spin, turn_max=a.turn_max)
 standing = a.standing or a.stand

@@ -80,6 +80,18 @@ if a.keep:
     keep = Shared(0.0)
     keep.ctl["arm"] = False
     threading.Thread(target=ws_thread, args=(keep, a.keep), daemon=True).start()
+if not a.standing:
+    # first command: the sit, as the app sends it (ch5 554 -> 562). It centres the head; until then its position
+    # is unknown (the twin shows it as unknown and centres on the same 554)
+    print("centring the head: sit command ch5 554 -> 562", flush=True)
+    for ch5, secs in ((554, 1.1), (562, 2.5)):
+        end = time.monotonic() + secs
+        while time.monotonic() < end:
+            with link.sh.lock:
+                link.sh.ctl["ch5"] = ch5
+            link.drive(0, 0)
+            twin.state([1000, 1000, 1000, 2015, 32, ch5], (0, 0, 0), (0, 0, a.cam_h, 0, 0, 0), per.hfov, "sit")
+            time.sleep(1 / 30)
 print("up: arm in the sim (live scene, F12), arrows drive; idle = drift hold", flush=True)
 
 n = lambda c: max(-1.0, min(1.0, (c - 1000) / 999))
