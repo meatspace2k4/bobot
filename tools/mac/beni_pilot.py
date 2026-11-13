@@ -87,7 +87,7 @@ class StickYaw:
         a = math.degrees(math.atan2(rx, -ry))
         if not self.active:
             self.active = True
-            self.tilt_only = abs(rx) < DEADZONE and ry > 0  # started straight back: tilt only, no yaw
+            self.tilt_only = abs(a) > 150.0  # push started within 30 deg of 6:00: tilt only until it breaks out
             self.theta = 0.0 if self.tilt_only else a
         if self.tilt_only:
             if abs(a) > 150.0:          # still within 30 deg of straight back: tilt only
