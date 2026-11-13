@@ -10,7 +10,8 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
                    velocity reaches zero (~0.4 s from full speed, RL 3500 uu/s^2), then reverses
   right stick      one mode per push: starts within 30 deg of 12:00/6:00 = tilt only (forward = look down,
                    back = look up); outside that wedge = yaw only, following the stick angle (9:00 = look left,
-                   6:00 = look behind, unwrapped, holds behind). No tilt while turning.
+                   6:00 = look behind, unwrapped, holds behind). No tilt while turning, unless look lock is on.
+  R3 (click)       toggle look lock: turns keep the tilt set by a push that started in the up/down wedge
                    both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
@@ -30,7 +31,7 @@ os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 W, H = 960, 720
 DEADZONE = 0.04  # only to kill stick drift at rest; values outside it pass through unscaled
 # SDL2 joystick indices for DualSense
-B_CROSS, B_TRIANGLE, B_OPTIONS, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 3, 6, 11, 12, 13, 14, 15
+B_CROSS, B_TRIANGLE, B_OPTIONS, B_R3, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 3, 6, 8, 11, 12, 13, 14, 15
 A_LX, A_LY, A_L2, A_R2 = 0, 1, 4, 5
 A_RX, A_RY = 2, 3
 DPAD_FLIPS = {B_UP: "flip_forward", B_DOWN: "flip_back", B_LEFT: "flip_left", B_RIGHT: "flip_right"}
@@ -258,7 +259,7 @@ def main():
     yaw = StickYaw()
     t_prev = time.monotonic()
     drive = RLDrive()
-    head_hv = (0.0, 0.0)
+    head_hv, look_lock = (0.0, 0.0), False
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -285,6 +286,8 @@ def main():
                         sh.ctl["estop"] = True
                     elif e.button == B_OPTIONS:
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
+                    elif e.button == B_R3:
+                        look_lock = not look_lock
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
                     elif e.button == B_CROSS and js:
@@ -310,7 +313,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = drive.step(trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)), dt_loop)
-                head_hv = yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo)
+                head_hv = yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo, look_lock)
                 sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_hv[0], v=head_hv[1], boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
