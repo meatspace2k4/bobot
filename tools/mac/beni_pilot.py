@@ -136,6 +136,39 @@ class RLDrive:
         return u
 
 
+class LookController:
+    """Right stick -> head, plus R3 look lock.
+    - Unlocked: StickYaw (tilt-only wedge at 12:00/6:00, yaw elsewhere, no tilt while turning).
+    - toggle(): R3. Locking freezes yaw at the head's current aim (works mid-turn with the stick held).
+    - Locked: right stick up/down still tilts. The lock arms for unlatching once the stick has been
+      released or sits in the up/down wedge; after that, the next sideways push unlatches it and
+      normal yaw takes over from that push."""
+    def __init__(self):
+        self.yaw = StickYaw()
+        self.locked, self.armed, self.lock_h = False, False, 0.0
+        self.last = (0.0, 0.0)
+
+    def toggle(self):
+        self.locked = not self.locked
+        self.armed, self.lock_h = False, self.last[0]
+
+    def step(self, rx, ry, expo):
+        import math
+        if self.locked:
+            mag = math.hypot(rx, ry)
+            sideways = mag >= DEADZONE and not self.yaw._in_wedge(math.degrees(math.atan2(rx, -ry)))
+            if not sideways:
+                self.armed = True
+            elif self.armed:
+                self.locked = False
+                self.yaw = StickYaw()          # fresh gesture: yaw follows this push
+        if self.locked:
+            self.last = (self.lock_h, -head_curve(ry, expo))
+        else:
+            self.last = self.yaw.step(rx, ry, expo)
+        return self.last
+
+
 def raw(v):
     """Stick value as-is (-1..1), zero only inside the drift deadzone."""
     return 0.0 if abs(v) < DEADZONE else max(-1.0, min(1.0, v))
