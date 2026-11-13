@@ -3,3 +3,5 @@ __pycache__/
 captures/*
 tools/pi/beni.env
 .DS_Store
+third_party/
+.venv-sim/

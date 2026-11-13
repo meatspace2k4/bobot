@@ -17,18 +17,19 @@ Channel -> sim mapping (scales are bench parameters, NOT measured robot units):
 usage: beni_sim.py --open-beni ~/src/open-beni [--port 19007] [--no-video] [--view]
 needs: pip install mujoco onnxruntime numpy; ffmpeg on PATH for video
 """
-import argparse, math, socket, struct, subprocess, sys, threading, time
+import argparse, math, os, socket, struct, subprocess, sys, threading, time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import mujoco
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 import onnxruntime as ort
 
 ACTION_JOINTS = ["L1", "R1", "L2", "R2", "LW", "RW", "head_yaw_joint"]
 OBS_JOINTS = ["L1", "R1", "head_yaw_joint", "L2", "R2", "LW", "RW"]
 DEFAULT_Q = {"L1": 0.3, "R1": 0.3, "L2": 0.5, "R2": 0.5, "LW": 0.0, "RW": 0.0,
-             "head_yaw_joint": 0.0, "head_roll_joint": 0.0}
+             "head_yaw_joint": 0.0}
 SCALE = {"L1": .25, "R1": .25, "L2": .25, "R2": .25, "LW": 20.0, "RW": 20.0, "head_yaw_joint": .5}
 # open-beni python/beni_rl/beni_robot.py actuator config
 MOTOR = {
@@ -39,11 +40,11 @@ MOTOR = {
     "LW": dict(kp=0., kd=.004, lim=.6, arm=0., fl=.005),
     "RW": dict(kp=0., kd=.004, lim=.6, arm=0., fl=.005),
     "head_yaw_joint": dict(kp=3., kd=.05, lim=.1, arm=0., fl=0.),
-    "head_roll_joint": dict(kp=2., kd=0., lim=1., arm=0., fl=0.),
 }
 DT, DECIMATION, DELAY_SUBSTEPS, KNEE_DAMPING = .002, 5, 2, 1.2
 JUMP_FRAMES, JUMP_HEIGHT = 41, .18
 OFF_W, OFF_H = 1920, 1440
+KEEP_HEAD_ROLL = False
 ACTIONS = {1: "jump", 2: "flip_forward", 4: "flip_back", 6: "flip_left", 8: "flip_right"}
 
 
@@ -71,10 +72,20 @@ def build_xml(root_dir: Path) -> str:
             if g.get("contype", "1") != "0" or g.get("conaffinity", "1") != "0":
                 g.set("name", n + "_collision")
                 g.set("priority", "1")
-    vis = root.find("visual") or ET.SubElement(root, "visual")
+    vis = root.find("visual")
+    if vis is None:
+        vis = ET.SubElement(root, "visual")
     ET.SubElement(vis, "global", offwidth=str(OFF_W), offheight=str(OFF_H))
     head = root.find('.//body[@name="head"]')
+    # The real head has no roll freedom; the model's ±0.05 rad roll joint rocks it loose.
+    if not KEEP_HEAD_ROLL:
+        head.remove(head.find('joint[@name="head_roll_joint"]'))
     ET.SubElement(head, "camera", name="head_cam", pos="0.06 0 0.05", xyaxes="0 -1 0 0 0 1", fovy="70")
+    # Chase camera rig: a mocap body that Sim moves to Beni's position and heading every step
+    # (yaw only, ground level), with a camera behind and above looking forward. Shows up in
+    # MuJoCo's camera list as "chase", next to "head_cam".
+    rig = ET.SubElement(root.find("worldbody"), "body", name="chase_rig", mocap="true")
+    ET.SubElement(rig, "camera", name="chase", pos="-1.0 0 0.45", xyaxes="0 -1 0 0.259 0 0.966", fovy="60")
     asset = root.find("asset")
     ET.SubElement(asset, "texture", name="grid", type="2d", builtin="checker", rgb1=".35 .37 .4", rgb2=".25 .27 .3", width="512", height="512")
     ET.SubElement(asset, "material", name="grid", texture="grid", texrepeat="40 40", reflectance=".1")
@@ -83,6 +94,8 @@ def build_xml(root_dir: Path) -> str:
     wb.insert(0, ET.Element("light", pos="0 0 4", dir="0 0 -1", directional="true"))
     for i, (x, y, s) in enumerate([(3, 1.5, .1), (4, -2, .15), (-2, 2, .1), (-3, -1.5, .12), (1, 4, .2)]):
         wb.insert(0, ET.Element("geom", name=f"block{i}", type="box", pos=f"{x} {y} {s}", size=f"{s} {s} {s}", rgba=".8 .4 .2 1"))
+    from viewer_ui import dress_scene
+    dress_scene(root)
     return ET.tostring(root, encoding="unicode")
 
 
@@ -124,7 +137,10 @@ class Sim:
         self.sens = {n: self.m.sensor_adr[mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_SENSOR, n)]
                      for n in ("imu_gyro", "imu_quat", "head_imu_gyro")}
         self.cam = mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_CAMERA, "head_cam")
+        self.chase_cam = mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_CAMERA, "chase")
+        self.rig = self.m.body_mocapid[mujoco.mj_name2id(self.m, mujoco.mjtObj.mjOBJ_BODY, "chase_rig")]
         pol = Path(a.policy).expanduser() if a.policy else Path(a.open_beni).expanduser() / "assets/models/policy.onnx"
+        self.head_override = True
         self.pol = ort.InferenceSession(str(pol), providers=["CPUExecutionProvider"])
         self.reset()
 
@@ -140,6 +156,7 @@ class Sim:
         self.delay = [np.zeros(7, np.float32) for _ in range(DELAY_SUBSTEPS)]
         self.vx = self.wz = 0.
         self.jump_frame, self.jump_hold, self.jump_age = -1, None, 0
+        self.update_rig()
         mujoco.mj_forward(m, d)
 
     def obs(self, gimbal_yaw):
@@ -174,17 +191,20 @@ class Sim:
         act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw)[None], "h_in": self.h})
         act = act[0].astype(np.float32)
         # The public policy has no reward on its gimbal input; head yaw follows ch2 directly.
-        act[6] = gimbal_yaw / SCALE["head_yaw_joint"]
+        if self.head_override:
+            act[6] = gimbal_yaw / SCALE["head_yaw_joint"]
         for _ in range(DECIMATION):
             self.delay.append(act)
             a = self.delay.pop(0)
             for i, n in enumerate(ACTION_JOINTS):
                 damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
                 d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)
-            hr = "head_roll_joint"
-            d.ctrl[self.ja[hr]] = torque(hr, d.qpos[self.jq[hr]], d.qvel[self.jv[hr]], 0.)
+            if "head_roll_joint" in self.ja:
+                hr = "head_roll_joint"
+                d.ctrl[self.ja[hr]] = torque(hr, d.qpos[self.jq[hr]], d.qvel[self.jv[hr]], 0.)
             mujoco.mj_step(self.m, d)
         self.last = act
+        self.update_rig()
         mujoco.mj_forward(self.m, d)
         if self.jump_frame >= 0:
             self.jump_frame += 1
@@ -197,6 +217,13 @@ class Sim:
         if not np.all(np.isfinite(d.qpos)) or d.qpos[2] < -1:
             print("sim diverged; reset", flush=True)
             self.reset()
+
+    def update_rig(self):
+        d = self.d
+        w, x, y, z = d.qpos[3:7]
+        h = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        d.mocap_pos[self.rig] = (d.qpos[0], d.qpos[1], 0.)
+        d.mocap_quat[self.rig] = (math.cos(h / 2), 0., 0., math.sin(h / 2))
 
     def set_tilt(self, pitch):
         f = np.array([math.cos(pitch), 0., math.sin(pitch)])
@@ -282,8 +309,8 @@ def main():
     ap.add_argument("--open-beni", required=True, help="path to an open-beni checkout")
     ap.add_argument("--policy", help="override policy .onnx")
     ap.add_argument("--port", type=int, default=19007)
-    ap.add_argument("--vx-max", type=float, default=2.0, help="m/s at ch0=1999 (bench parameter)")
-    ap.add_argument("--wz-max", type=float, default=5.0, help="rad/s at ch1=1 (bench parameter)")
+    ap.add_argument("--vx-max", type=float, default=1.5, help="m/s at full stick")
+    ap.add_argument("--wz-max", type=float, default=1.8, help="rad/s at full stick")
     ap.add_argument("--pan-max", type=float, default=math.pi, help="head yaw rad at ch2=1999")
     ap.add_argument("--tilt-max", type=float, default=math.radians(45), help="camera pitch rad at tilt 62")
     ap.add_argument("--no-video", action="store_true")
@@ -303,8 +330,8 @@ def main():
     renderer = None if a.no_video else mujoco.Renderer(sim.m, a.height, a.width)
     viewer = None
     if a.view:
-        from mujoco import viewer as mjviewer
-        viewer = mjviewer.launch_passive(sim.m, sim.d)
+        from viewer_ui import BeniViewer
+        viewer = BeniViewer(sim, "BENCH BENI  live")
     print(f"bench Beni on udp 127.0.0.1:{a.port}", flush=True)
 
     period, render_every = DT * DECIMATION, max(1, round(1 / (a.fps * DT * DECIMATION)))
@@ -323,7 +350,17 @@ def main():
             print(f"{time.strftime('%H:%M:%S')} action {name}" + ("" if code == 1 else " (not in policy; logged only)"), flush=True)
             if code == 1:
                 sim.jump()
+            if viewer:
+                viewer.action(code)
         last_ch4 = ch[4]
+        if viewer and viewer.reset_requested:
+            viewer.reset_requested = False
+            sim.reset()
+        if viewer and viewer.paused:
+            viewer.update(ch, vx, wz, "stale" if stale else "pilot")
+            time.sleep(period)
+            t_next = time.monotonic()
+            continue
         sim.step(vx, wz, yaw)
         zmax = max(zmax, float(sim.d.qpos[2]))
         if renderer and k % render_every == 0:
@@ -331,7 +368,9 @@ def main():
             renderer.update_scene(sim.d, camera=sim.cam)
             video.frame(renderer.render())
         if viewer:
-            viewer.sync()
+            if not viewer.running():
+                break
+            viewer.update(ch, vx, wz, "no pilot" if stale else "pilot", (((ch[3] & 0x3F) - 31) / 31) * a.tilt_max)
         now = time.monotonic()
         if now - t_log > 1:
             t_log = now

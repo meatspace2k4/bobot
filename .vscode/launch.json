@@ -1,0 +1,8 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    { "name": "Beni sim: viewer", "type": "node-terminal", "request": "launch", "command": "${workspaceFolder}/tools/sim/launch.sh viewer" },
+    { "name": "Beni sim: dev dashboard", "type": "node-terminal", "request": "launch", "command": "${workspaceFolder}/tools/sim/launch.sh dev" },
+    { "name": "Beni sim: bench (UDP 19007)", "type": "node-terminal", "request": "launch", "command": "${workspaceFolder}/tools/sim/launch.sh bench" }
+  ]
+}

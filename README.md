@@ -40,10 +40,25 @@ The Pi returns to the home Wi-Fi when the relay stops. Rerunning `beni_start.sh`
 
 Captures (`captures/`, ~2 GB) and `beni.env` are not tracked.
 
-## Bench sim (no robot)
-Needs an open-beni checkout, plus `pip install mujoco onnxruntime numpy` and ffmpeg.
-```sh
-python3 tools/sim/beni_sim.py --open-beni ~/src/open-beni
-python3 tools/pi/beni_bridge.py --robot 127.0.0.1:19007 --port 18780
-python3 tools/mac/beni_pilot.py http://127.0.0.1:18780
+## SDK (`beni/`)
+Direct UCP control and video. Be on Beni's Wi-Fi with the phone app off it.
+```python
+from beni import Beni
+with Beni() as b:                  # 192.168.7.1:9007; Beni(host, port) for the bench sim
+    b.drive(throttle=0.3, yaw=0)   # -1..1, held and re-sent at 50 Hz
+    b.head(pan=0.2, tilt=-0.5)
+    b.action("jump")               # jump, flip_forward, flip_back, flip_left, flip_right
+    for au in b.frames(seconds=5): # H.265 Annex-B access units, starting at a keyframe
+        ...
 ```
+CLI: `python3 -m beni probe | record out.hevc | action jump`. Demo: `examples/drive_demo.py`.
+Not covered: telemetry and app commands (E2E-encrypted).
+
+## Sim (no robot)
+`tools/sim/launch.sh viewer | dev | bench`, also listed as VS Code launch configurations.
+- `viewer`: HUD, head-camera inset, chart, buttons for replay scenes and the box tour
+- `dev`: MuJoCo's stock viewer with its panels, same sim and sources (F6/F7 scene, F8/F9 collection)
+- `bench`: headless robot on UDP 127.0.0.1:19007 for the bridge or the SDK
+
+Setup: clone open-beni into `third_party/`, create `.venv-sim` (`pip install mujoco onnxruntime numpy`),
+and put `tools/topic_trace.py` output in `captures/traces/`.
