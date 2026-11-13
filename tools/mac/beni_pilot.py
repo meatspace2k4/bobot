@@ -8,14 +8,15 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick X     steer
   R2 / L2          Rocket League throttle: L2 while moving forward brakes (sends 0) until the estimated
                    velocity reaches zero (~0.4 s from full speed, RL 3500 uu/s^2), then reverses
-  right stick      head yaw follows stick ANGLE (9:00 = look left, 6:00 = look behind; unwrapped, holds behind);
-                   a push that starts straight back only tilts (no yaw) until the stick recenters
-                   right stick Y also tilts: forward = look down, back = look up (ch3 low 6 bits)
+  right stick      one mode per push: starts within 30 deg of 12:00/6:00 = tilt only (forward = look down,
+                   back = look up); outside that wedge = yaw only, following the stick angle (9:00 = look left,
+                   6:00 = look behind, unwrapped, holds behind). Tilt while turning only with Triangle.
                    both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
-  Triangle         camera lock: releasing the right stick holds the head's aim instead of re-centering (--cam-lock toggle|hold)
+  Triangle         keep the tilt from a push that started in the up/down wedge while turning (off by default);
+                   --cam-lock toggle|hold picks toggle or hold. A push that starts sideways never tilts.
   D-pad            direct flips: up = forward, down = back, left = left, right = right
   Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
@@ -69,62 +70,39 @@ def head_curve(v, expo):
 
 
 class StickYaw:
-    """Head yaw follows the right stick's ANGLE (0 = forward/up, +90 = right, +-180 = behind),
-    unwrapped so passing 6:00 keeps facing back instead of swinging around; clamped to +-180.
-    Push distance scales the turn through the head curve. Released stick -> face forward.
-    Returns ch2 command -1..1 (ch2 extremes = head turned 180)."""
-    def __init__(self):
-        self.theta = 0.0   # unwrapped degrees
-        self.active = False
-        self.tilt_only = False
+    """Right stick -> head (pan h, tilt v), one mode per push (deadzone wedges keep them from mixing):
+      - push starts within 30 deg of 12:00 or 6:00 -> TILT only (forward = look down, back = look up), no yaw
+      - push leaves that wedge (or starts outside it) -> YAW only, tilt level: yaw follows the stick ANGLE
+        (9:00 = -90, 6:00 = -180), unwrapped so sweeping past 6:00 holds facing back
+    Push distance scales both through the head curve. Released stick -> forward and level."""
+    WEDGE = 30.0
 
-    def step(self, rx, ry, expo):
+    def __init__(self):
+        self.theta, self.mode = 0.0, None   # mode: None | "tilt" | "yaw"
+        self.held_tilt = 0.0                # tilt set in the starting wedge, carried into a turn
+
+    def _in_wedge(self, a):
+        return abs(a) <= self.WEDGE or abs(a) >= 180.0 - self.WEDGE
+
+    def step(self, rx, ry, expo, tilt_in_turn=False):
         import math
         mag = min(1.0, math.hypot(rx, ry))
         if mag < DEADZONE:
-            self.active, self.theta, self.tilt_only = False, 0.0, False
-            return 0.0
+            self.theta, self.mode, self.held_tilt = 0.0, None, 0.0
+            return 0.0, 0.0
         a = math.degrees(math.atan2(rx, -ry))
-        if not self.active:
-            self.active = True
-            self.tilt_only = abs(a) > 150.0  # push started within 30 deg of 6:00: tilt only until it breaks out
-            self.theta = 0.0 if self.tilt_only else a
-        if self.tilt_only:
-            if abs(a) > 150.0:          # still within 30 deg of straight back: tilt only
-                return 0.0
-            self.tilt_only, self.theta = False, a  # moved left/right out of the 6:00 zone: yaw resumes
-        else:
-            d = (a - self.theta + 180.0) % 360.0 - 180.0
-            self.theta = max(-180.0, min(180.0, self.theta + d))
-        return (self.theta / 180.0) * head_curve(mag, expo)
-
-
-class RLDrive:
-    """Rocket League ground throttle (RLBot wiki Useful-Game-Values; RLUtilities car.cc constants), on an
-    estimated velocity in uu/s. Throttle opposing motion (|v| > 10) = brake at 3500 uu/s^2 (any amount):
-    command 0 and let Beni's own model decelerate; once the estimate reaches zero, reverse is passed through.
-    Zero throttle coasts at 525 uu/s^2. Throttle accel = u * (1550 - |v|), top speed 1410.
-    These are accelerations, so mass cancels: full-speed brake takes 1410/3500 ~= 0.40 s."""
-    BRAKE, COAST, FORCE, VMAX, MIN_V, THRESH = 3500.0, 525.0, 1550.0, 1410.0, 10.0, 0.05
-
-    def __init__(self):
-        self.v = 0.0
-
-    def step(self, u, dt):
-        v, sgn = self.v, (1.0 if self.v > 0 else -1.0)
-        if u * sgn < -0.001 and abs(v) > self.MIN_V:              # opposing input: brake, send 0
-            nv = v - sgn * self.BRAKE * dt
-            self.v = 0.0 if nv * sgn < 0 else nv
-            return 0.0
-        if abs(u) < self.THRESH:                                   # coast
-            if abs(v) > self.MIN_V:
-                nv = v - sgn * self.COAST * dt
-                self.v = 0.0 if nv * sgn < 0 else nv
-            else:
-                self.v = 0.0
-            return 0.0
-        self.v = max(-self.VMAX, min(self.VMAX, v + u * max(0.0, self.FORCE - abs(v)) * dt))
-        return u
+        c = head_curve(mag, expo)
+        if self.mode is None:
+            self.mode = "tilt" if self._in_wedge(a) else "yaw"
+            self.theta = a
+        if self.mode == "tilt":
+            if self._in_wedge(a):
+                self.held_tilt = -head_curve(ry, expo)  # stick forward (ry<0) -> look down
+                return 0.0, self.held_tilt
+            self.mode, self.theta = "yaw", a          # broke out sideways: yaw from here
+        d = (a - self.theta + 180.0) % 360.0 - 180.0
+        self.theta = max(-180.0, min(180.0, self.theta + d))
+        return (self.theta / 180.0) * c, (self.held_tilt if tilt_in_turn else 0.0)
 
 
 def raw(v):
@@ -220,7 +198,7 @@ def main():
     a.add_argument("url")
     a.add_argument("--cap", type=float, default=1.0)
     a.add_argument("--head-expo", type=float, default=4.0, help="right-stick head pan curve (1 = linear)")
-    a.add_argument("--cam-lock", choices=["toggle", "hold"], default=os.environ.get("CAM_LOCK", "toggle"), help="Triangle camera lock: toggle or hold")
+    a.add_argument("--cam-lock", choices=["toggle", "hold"], default=os.environ.get("CAM_LOCK", "toggle"), help="Triangle (tilt while turning): toggle or hold")
     a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')
@@ -309,10 +287,8 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = drive.step(trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)), dt_loop)
-                locked = cam_locked if args.cam_lock == "toggle" else bool(js.get_button(B_TRIANGLE))
-                rx_, ry_ = raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY))
-                if (rx_, ry_) != (0.0, 0.0) or not locked:  # locked: stick still works; release holds last aim
-                    head_hv = (yaw.step(rx_, ry_, args.head_expo), -head_curve(ry_, args.head_expo))
+                tilt_in_turn = cam_locked if args.cam_lock == "toggle" else bool(js.get_button(B_TRIANGLE))
+                head_hv = yaw.step(raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY)), args.head_expo, tilt_in_turn)
                 sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_hv[0], v=head_hv[1], boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
