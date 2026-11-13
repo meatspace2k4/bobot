@@ -14,7 +14,7 @@ Keyboard: Space = e-stop, C = clear, Esc = quit.
 
 Test without hardware: --headless --test-input "t=0.5,y=0,arm=1" --seconds 8
 """
-import argparse, asyncio, json, os, subprocess, threading, time
+import argparse, asyncio, collections, json, os, subprocess, threading, time
 
 os.environ.setdefault("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1")
 
@@ -32,6 +32,8 @@ class Shared:
         self.status = {}
         self.ws_up = False
         self.frame = None
+        self.frames = collections.deque(maxlen=60)    # jitter buffer of decoded frames
+        self.arrivals = collections.deque(maxlen=120)  # arrival times, to estimate the source rate
         self.vfps = 0.0
         self.quit = threading.Event()
 
@@ -47,14 +49,16 @@ def video_thread(sh, url):
         frames, t0 = 0, time.monotonic()
         try:
             while not sh.quit.is_set():
-                buf = bytearray()
-                while len(buf) < n:
-                    chunk = p.stdout.read(n - len(buf))
-                    if not chunk:
+                buf = bytearray(n)
+                mv, got = memoryview(buf), 0
+                while got < n:
+                    k = p.stdout.readinto(mv[got:])
+                    if not k:
                         raise EOFError
-                    buf += chunk
+                    got += k
                 with sh.lock:
-                    sh.frame = bytes(buf)
+                    sh.frames.append(bytes(buf))
+                    sh.arrivals.append(time.monotonic())
                 frames += 1
                 dt = time.monotonic() - t0
                 if dt >= 1.0:
@@ -106,6 +110,7 @@ def main():
     a = argparse.ArgumentParser()
     a.add_argument("url")
     a.add_argument("--cap", type=float, default=0.3)
+    a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')
     a.add_argument("--seconds", type=float, default=0)
@@ -133,6 +138,7 @@ def main():
         test = {k: float(v) for k, v in (kv.split("=") for kv in args.test_input.split(","))}
     end = time.monotonic() + args.seconds if args.seconds else None
     last_btn = None
+    playing, next_show, buffered = False, 0.0, 0
 
     while not sh.quit.is_set():
         for e in pygame.event.get():
@@ -173,7 +179,25 @@ def main():
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
             st = dict(sh.status)
+            # Jitter buffer: play frames out at the measured source rate, holding ~buffer_ms of slack.
+            # Bursts from the tunnel are absorbed; if the backlog grows past 3x target, catch up by dropping.
+            if len(sh.arrivals) >= 2:
+                src_fps = (len(sh.arrivals) - 1) / max(1e-3, sh.arrivals[-1] - sh.arrivals[0])
+            else:
+                src_fps = 30.0
+            target = max(1, int(src_fps * args.buffer_ms / 1000))
+            now = time.monotonic()
+            if len(sh.frames) > 3 * target:
+                while len(sh.frames) > target:
+                    sh.frames.popleft()
+            if sh.frames and (playing or len(sh.frames) >= target) and now >= next_show:
+                sh.frame = sh.frames.popleft()
+                playing = True
+                next_show = max(next_show + 1.0 / src_fps, now - 0.05)
+            elif not sh.frames:
+                playing = False  # underrun: rebuffer to target before resuming
             frame = sh.frame
+            buffered = len(sh.frames)
 
         if frame:
             screen.blit(pygame.image.frombuffer(frame, (W, H), "RGB"), (0, 0))
@@ -182,7 +206,7 @@ def main():
         armed = ctl["arm"] and not st.get("estop")
         lines = [
             f"link {'UP' if sh.ws_up else 'DOWN'}  ucp {'up' if st.get('ucp') else 'down'}  "
-            f"video {sh.vfps:4.1f} fps (beni {st.get('fps', 0)})  ctl age {st.get('ctl_age_ms')} ms",
+            f"video {sh.vfps:4.1f} fps (beni {st.get('fps', 0)})  buf {buffered}  ctl age {st.get('ctl_age_ms')} ms",
             f"{'E-STOP (Options to clear)' if st.get('estop') else ('ARMED' if armed else 'disarmed (hold R1)')}"
             f"   cap {ctl['cap']:.0%} (max {st.get('max_cap', 0):.0%})   ch {st.get('ch')}"
             f"   pad {'ok' if js else 'NONE'}  btn {last_btn}",
