@@ -114,6 +114,36 @@ Every later envelope: `session_id[8] ‖ counter[8, BE, per direction] ‖ ciphe
 - **Session lock:** Beni serves one UCP peer and refuses others (ICMP port unreachable) until that peer's session expires. Take the phone off Beni's Wi-Fi, then sync. Stick frames alone drive Beni once the session is held; the encrypted pilot-mode command is not needed (verified 22:41).
 - **Tunnel delivery:** the quick tunnel delivers the stream in 128 KiB blocks every 200–400 ms, whatever the Content-Type (A/B tested `video/hevc` vs `text/event-stream`). Beni→Pi is a steady 60 fps. The pilot absorbs this with a jitter buffer (`--buffer-ms`, default 100).
 
+## Reference: open-beni model and policy (read 2026-11-13, open-beni @ 4545b86)
+These are the public sim and policy, not measured robot values.
+- **Head:**
+  - `head_yaw_joint` range ±5.20 rad (±298°). We observed ch2 = 1/1999 at about ±180° on the robot, so ch2's span sits inside the joint range.
+  - `head_roll_joint` ±0.05 rad, which "follows roll mechanically".
+  - **The model has no head tilt joint.** ch3 tilt drives a camera axis the model does not include.
+- **Policy command inputs:**
+  - lin_vel_x ±2.0 m/s, ang_vel_z ±5.0 rad/s (lin_vel_y fixed at 0)
+  - base pitch and roll ±0.1 rad, height 0.10–0.12 m (nominal 0.11)
+  - gimbal yaw ±5 rad plus an enable flag. No reward term uses the gimbal input, so the public policy ignores it.
+  - jump: phase, height 0.18 m
+- **Policy loop:** 100 Hz (2 ms physics × 5), 512-wide recurrent state, 2–5 substep command delay. Our stick frames are 50 Hz.
+- **Skills in the public repo:** drive, jump, recovery (getting up after a fall). **There are no flips.** Flip codes 2/4/6/8 run firmware skills outside this policy.
+- **Candidates for unmapped ch4 codes 3, 5, 7, 9–15:**
+  - recovery
+  - jump at the second reference height (0.25 m motion in `assets/motions`)
+  - the pose inputs (pitch, roll, height) could instead sit in the ch5 or ch3 upper bits
+
+  None is verified; each needs a capture or live test.
+- **Open:** the physical scale of ch0/ch1. Measure speed and yaw rate at fixed channel values on the robot (video odometry) to fill this in.
+
+## Bench sim (`tools/sim/beni_sim.py`)
+The open-beni policy runs in MuJoCo behind a UCP endpoint, so `beni_bridge.py --robot 127.0.0.1:19007` drives it unchanged.
+- ch0/ch1 → velocity commands; scales are flags (`--vx-max`, `--wz-max`), not measured.
+- ch2 → head yaw (`--pan-max`, default ±π).
+- ch3 tilt → render camera pitch only.
+- ch4 code 1 → jump. Flip codes are logged only.
+- Video: a head-camera render → VideoToolbox HEVC → UCP 0x07/0x05 fragments.
+- Checked 2026-11-13: full ch0 holds 2.06 m/s at the default scale, ch2 = 1999 puts the head at +3.14 rad, and a jump reaches base z 0.226 m.
+
 ## Open
 - [ ] Pairing key: capture a re-pair (BLE + `e2e_provision` + cloud) to see where it originates
 - [ ] Session KDF and AEAD (guess HKDF-SHA256 + AES-GCM or ChaCha20-Poly1305; verify once the key is in hand)

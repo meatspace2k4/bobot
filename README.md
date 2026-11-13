@@ -39,3 +39,11 @@ Each session:
 The Pi returns to the home Wi-Fi when the relay stops. Rerunning `beni_start.sh` reuses the tunnel and its URL.
 
 Captures (`captures/`, ~2 GB) and `beni.env` are not tracked.
+
+## Bench sim (no robot)
+Needs an open-beni checkout, plus `pip install mujoco onnxruntime numpy` and ffmpeg.
+```sh
+python3 tools/sim/beni_sim.py --open-beni ~/src/open-beni
+python3 tools/pi/beni_bridge.py --robot 127.0.0.1:19007 --port 18780
+python3 tools/mac/beni_pilot.py http://127.0.0.1:18780
+```
