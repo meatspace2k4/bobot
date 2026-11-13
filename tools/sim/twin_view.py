@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from twin import TwinServer
 
 NEUTRAL = [1000, 1000, 1000, 2015, 32, 546]
-PLANE_D = 0.6          # m in front of the camera
+PLANE_D = 0.25         # m in front of the camera (the frame is 2 D tan(hfov/2) wide: ~0.42 m)
 STALE = 0.5            # s without state -> neutral sticks
 REMIND_TAU = 0.5       # s, pull of the sim Beni toward the RGB pose estimate
 MAX_POINTS = 3000
