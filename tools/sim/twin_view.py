@@ -74,7 +74,7 @@ class TwinSource:
         self.next_ctl = 0.0
         self.step = step
         self.cam_body = m.body("twin_cam").mocapid[0]
-        self.plane = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, "twin_plane")
+        self.mat = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_MATERIAL, "twin_img")
         self.marks = []
         i = 0
         while mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, f"twin_mark{i}") >= 0:
@@ -217,9 +217,14 @@ class TwinSource:
             D = PLANE_D if down <= 0.02 else max(0.08, min(PLANE_D, 0.9 * P[2] / math.tan(down)))
             w, h = 2 * D * tanh, 2 * D * tanv
             C = P + D * f
-            d.mocap_pos[self.cam_body] = C
-            d.mocap_quat[self.cam_body] = q
-            m.geom_size[self.plane] = (w / 2, h / 2, 0.002)
+            # The frame is drawn in the viewer's user scene, not as a model geom: no geom-group toggle
+            # (number keys) can hide it, and the head-camera inset (its own scene) never sees it.
+            if scn.ngeom < scn.maxgeom:
+                g = scn.geoms[scn.ngeom]
+                mujoco.mjv_initGeom(g, mujoco.mjtGeom.mjGEOM_BOX, np.array([w / 2, h / 2, 0.002]), C,
+                                    R.flatten(), np.array([1, 1, 1, 1], np.float32))
+                g.matid = self.mat
+                scn.ngeom += 1
             for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
                 self._line(scn, P, C + sx * r * w / 2 + sy * u * h / 2, (1, 1, .3, 1), 2)
             pts = [to_sim(*p) for p in path]

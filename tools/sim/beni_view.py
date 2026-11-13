@@ -422,7 +422,6 @@ def run(a, ui):
 
     v = mjviewer.launch_passive(m, d, key_callback=key, show_left_ui=not ui, show_right_ui=not ui)
     base = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "base_link")
-    v.opt.geomgroup[3] = 1  # twin image plane: shown in the main view, hidden from the head-camera inset
     # Both views: follow camera; the mouse orbit is kept as an offset on top of Beni's heading.
     follow = FollowCamera(v, m, base, d, distance=1.2 if ui else 1.1, elevation=-20. if ui else -18.,
                           head_q=sim.jq.get("head_yaw_joint"), pov_cam=sim.cam)
