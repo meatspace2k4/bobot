@@ -193,8 +193,12 @@ class TwinSource:
             # sim head camera = real camera: measured pitch and roll (+ calibration offsets), in the head frame
             cam = st["cam"]
             # a bad floor fit (head swept onto a wall) must not throw the camera: clamp to the head's range
-            pitch = max(-0.8, min(0.8, cam[4] if math.isfinite(cam[4]) else 0.0)) + math.radians(cal["tilt_offset_deg"])
-            roll = max(-0.5, min(0.5, cam[5] if len(cam) > 5 and math.isfinite(cam[5]) else 0.0)) + math.radians(cal["roll_offset_deg"])
+            sitting = st.get("posture") == "sit"
+            # sitting Beni looks perfectly level; standing: the measured pitch (clamped to the head's range)
+            pitch = (0.0 if sitting else max(-0.8, min(0.8, cam[4] if math.isfinite(cam[4]) else 0.0))) \
+                + math.radians(cal["tilt_offset_deg"])
+            roll = (0.0 if sitting else max(-0.5, min(0.5, cam[5] if len(cam) > 5 and math.isfinite(cam[5]) else 0.0))) \
+                + math.radians(cal["roll_offset_deg"])
             f0 = np.array([math.cos(pitch), 0., math.sin(pitch)])
             r0, u0 = np.array([0., -1., 0.]), np.array([-math.sin(pitch), 0., math.cos(pitch)])
             r1 = r0 * math.cos(roll) - u0 * math.sin(roll)            # + roll: right side down

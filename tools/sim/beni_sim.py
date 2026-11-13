@@ -161,6 +161,7 @@ class Sim:
         pol = Path(a.policy).expanduser() if a.policy else Path(a.open_beni).expanduser() / "assets/models/policy.onnx"
         self.head_override = True
         self.sit = False          # True: Beni's sitting / disabled state (no policy, legs folded)
+        self._sat = False
         self.pol = ort.InferenceSession(str(pol), providers=["CPUExecutionProvider"])
         self.reset()
 
@@ -208,6 +209,10 @@ class Sim:
             vx_cmd, wz_cmd = self.jump_hold, 0.
         self.vx += max(-.03, min(.03, vx_cmd - self.vx))
         self.wz += max(-.06, min(.06, wz_cmd - self.wz))
+        if self.sit and not self._sat:
+            self.enter_sit()
+        elif not self.sit and self._sat:
+            self.leave_sit()
         if self.sit:
             # disabled: no policy; joints held at the folded pose (action = offset from the default / scale)
             act = np.array([(SIT_Q[n] - DEFAULT_Q[n]) / SCALE[n] if n in SIT_Q else 0. for n in ACTION_JOINTS], np.float32)
@@ -222,10 +227,8 @@ class Sim:
             a = self.delay.pop(0)
             for i, n in enumerate(ACTION_JOINTS):
                 if self.sit and n in SIT_Q:
-                    # sitting is parked, not balanced: legs move to the folded pose kinematically (the motors
-                    # cannot lift the body's weight there), at most 3 rad/s, and the body settles on its base
-                    q = d.qpos[self.jq[n]]
-                    d.qpos[self.jq[n]] = q + max(-3 * DT, min(3 * DT, SIT_Q[n] - q))
+                    # sitting is parked: legs held folded at the limits
+                    d.qpos[self.jq[n]] = SIT_Q[n]
                     d.qvel[self.jv[n]] = 0.
                     d.ctrl[self.ja[n]] = 0.
                     continue
@@ -235,6 +238,8 @@ class Sim:
                 hr = "head_roll_joint"
                 d.ctrl[self.ja[hr]] = torque(hr, d.qpos[self.jq[hr]], d.qvel[self.jv[hr]], 0.)
             mujoco.mj_step(self.m, d)
+            if self.sit:
+                self._level(d)
         self.last = act
         self.update_rig()
         mujoco.mj_forward(self.m, d)
@@ -249,6 +254,39 @@ class Sim:
         if not np.all(np.isfinite(d.qpos)) or d.qpos[2] < -1:
             print("sim diverged; reset", flush=True)
             self.reset()
+
+    @staticmethod
+    def _level(d):
+        """Sitting Beni rests perfectly level: keep heading, zero pitch/roll and their rates (height is free)."""
+        w, x, y, z = d.qpos[3:7]
+        h = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+        d.qpos[3:7] = (math.cos(h / 2), 0., 0., math.sin(h / 2))
+        d.qvel[3:5] = 0.
+        d.qvel[0:2] = 0.
+
+    def enter_sit(self):
+        """Straight into the parked sitting pose: body level on its base, legs folded at the limits, wheels up;
+        position and heading kept. (Folding it dynamically tips the body over.)"""
+        d = self.d
+        self._level(d)
+        d.qpos[2] = 0.05
+        d.qvel[:] = 0.
+        for n, v in SIT_Q.items():
+            d.qpos[self.jq[n]] = v
+        mujoco.mj_forward(self.m, d)
+        self._sat = True
+
+    def leave_sit(self):
+        """Back to standing at the same position and heading (the policy takes over from the default pose)."""
+        d = self.d
+        x, y = d.qpos[0], d.qpos[1]
+        w, qx, qy, qz = d.qpos[3:7]
+        h = math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+        self.reset()
+        d.qpos[0], d.qpos[1] = x, y
+        d.qpos[3:7] = (math.cos(h / 2), 0, 0, math.sin(h / 2))
+        mujoco.mj_forward(self.m, d)
+        self._sat = False
 
     def update_rig(self):
         d = self.d
