@@ -6,8 +6,8 @@ usage: beni_pilot.py https://<bridge>.trycloudflare.com
 Controls (DualSense). Stick values are passed through raw and linear, full range; the robot shapes motion itself.
   left stick Y     flip direction only (no throttle)
   left stick X     steer
-  R2               gas (forward)
-  L2               brake (zero throttle); reverse only while the left stick is pulled back and R2 is released
+  R2 / L2          Rocket League throttle: L2 while moving forward brakes (sends 0) until the estimated
+                   velocity reaches zero (~0.4 s from full speed, RL 3500 uu/s^2), then reverses
   right stick      head yaw follows stick ANGLE (9:00 = look left, 6:00 = look behind; unwrapped, holds behind);
                    a push that starts straight back only tilts (no yaw) until the stick recenters
                    right stick Y also tilts: forward = look down, back = look up (ch3 low 6 bits)
@@ -90,11 +90,41 @@ class StickYaw:
             self.tilt_only = abs(rx) < DEADZONE and ry > 0  # started straight back: tilt only, no yaw
             self.theta = 0.0 if self.tilt_only else a
         if self.tilt_only:
-            return 0.0
+            if abs(a) > 150.0:          # still within 30 deg of straight back: tilt only
+                return 0.0
+            self.tilt_only, self.theta = False, a  # moved left/right out of the 6:00 zone: yaw resumes
         else:
             d = (a - self.theta + 180.0) % 360.0 - 180.0
             self.theta = max(-180.0, min(180.0, self.theta + d))
         return (self.theta / 180.0) * head_curve(mag, expo)
+
+
+class RLDrive:
+    """Rocket League ground throttle (RLBot wiki Useful-Game-Values; RLUtilities car.cc constants), on an
+    estimated velocity in uu/s. Throttle opposing motion (|v| > 10) = brake at 3500 uu/s^2 (any amount):
+    command 0 and let Beni's own model decelerate; once the estimate reaches zero, reverse is passed through.
+    Zero throttle coasts at 525 uu/s^2. Throttle accel = u * (1550 - |v|), top speed 1410.
+    These are accelerations, so mass cancels: full-speed brake takes 1410/3500 ~= 0.40 s."""
+    BRAKE, COAST, FORCE, VMAX, MIN_V, THRESH = 3500.0, 525.0, 1550.0, 1410.0, 10.0, 0.05
+
+    def __init__(self):
+        self.v = 0.0
+
+    def step(self, u, dt):
+        v, sgn = self.v, (1.0 if self.v > 0 else -1.0)
+        if u * sgn < -0.001 and abs(v) > self.MIN_V:              # opposing input: brake, send 0
+            nv = v - sgn * self.BRAKE * dt
+            self.v = 0.0 if nv * sgn < 0 else nv
+            return 0.0
+        if abs(u) < self.THRESH:                                   # coast
+            if abs(v) > self.MIN_V:
+                nv = v - sgn * self.COAST * dt
+                self.v = 0.0 if nv * sgn < 0 else nv
+            else:
+                self.v = 0.0
+            return 0.0
+        self.v = max(-self.VMAX, min(self.VMAX, v + u * max(0.0, self.FORCE - abs(v)) * dt))
+        return u
 
 
 def raw(v):
@@ -223,6 +253,8 @@ def main():
     last_action = None
     pend_t, pend_dir = None, None
     yaw = StickYaw()
+    t_prev = time.monotonic()
+    drive = RLDrive()
     cam_locked, head_hv = False, (0.0, 0.0)
 
     while not sh.quit.is_set():
@@ -265,6 +297,8 @@ def main():
                         else:
                             sh.ctl["action"] = last_action = "jump"  # stick centered: jump now
 
+        now_l = time.monotonic()
+        dt_loop, t_prev = min(0.1, now_l - t_prev), now_l
         if pend_t is not None and time.monotonic() - pend_t > DOUBLE_TAP:
             with sh.lock:
                 sh.ctl["action"] = last_action = "jump"  # no 2nd tap: it was a single jump
@@ -274,12 +308,7 @@ def main():
             if test is not None:
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
-                r2, l2 = trig(js.get_axis(A_R2)), trig(js.get_axis(A_L2))
-                stick_back = raw(js.get_axis(A_LY)) > 0.5
-                if l2 > 0.0:
-                    t = -l2 if (stick_back and r2 == 0.0) else 0.0  # L2 = brake; reverse only with stick back and no gas
-                else:
-                    t = r2
+                t = drive.step(trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2)), dt_loop)
                 locked = cam_locked if args.cam_lock == "toggle" else bool(js.get_button(B_TRIANGLE))
                 rx_, ry_ = raw(js.get_axis(A_RX)), raw(js.get_axis(A_RY))
                 if (rx_, ry_) != (0.0, 0.0) or not locked:  # locked: stick still works; release holds last aim
