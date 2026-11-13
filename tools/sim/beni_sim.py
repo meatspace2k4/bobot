@@ -34,7 +34,7 @@ DEFAULT_Q = {"L1": 0.3, "R1": 0.3, "L2": 0.5, "R2": 0.5, "LW": 0.0, "RW": 0.0,
 POLICY_LIMITS = {"L1": (-2.679, 6.998), "R1": (-2.679, 6.998), "L2": (-0.908, 1.216), "R2": (-0.908, 1.216)}
 SIT_Q = {"L1": -2.679 + 0.01, "R1": -2.679 + 0.01, "L2": 1.21, "R2": 1.21}  # hips at their lower limit (thighs up
 # and rotated forward over the top), knees folded; reached by the motors, not placed
-SIT_LIM = {"L1": 1.375, "R1": 1.375, "L2": 3.6, "R2": 3.6}  # actuator effort limits (open-beni beni_robot.py)
+LEG_SPEED, LEG_KV = 2.0, 0.5  # sit / stand-up: leg motor speed (rad/s) and velocity gain (Nm s/rad)
 SCALE = {"L1": .25, "R1": .25, "L2": .25, "R2": .25, "LW": 20.0, "RW": 20.0, "head_yaw_joint": .5}
 # open-beni python/beni_rl/beni_robot.py actuator config
 MOTOR = {
@@ -97,6 +97,13 @@ def build_xml(root_dir: Path) -> str:
         if el is not None:
             sz = el.get("size").split()
             el.set("size", f"{sz[0]} {sz[1]} {float(sz[2]) - 0.007:.3f}")
+    # Body collision box: bottom extended by half an inch (12.7 mm); top unchanged.
+    el = root.find('.//geom[@name="base_collision"]')
+    if el is not None:
+        sx, sy, sz_ = (float(v) for v in el.get("size").split())
+        px, py, pz = (float(v) for v in el.get("pos").split())
+        el.set("size", f"{sx} {sy} {sz_ + 0.00635:.5f}")
+        el.set("pos", f"{px} {py} {pz - 0.00635:.5f}")
     head = root.find('.//body[@name="head"]')
     # The real head clears the folded thighs (hips at y +-0.048, thigh inner edge 0.053 m); the model's head
     # collision box is 0.12 m wide and does not. Narrowed to 0.10 m so the sit fold behaves like the robot.
@@ -183,6 +190,7 @@ class Sim:
         self.head_override = True
         self.sit = False          # True: Beni's sitting / disabled state (no policy, legs folded)
         self._sat = False
+        self._unfold = False
         self.pol = ort.InferenceSession(str(pol), providers=["CPUExecutionProvider"])
         self.reset()
 
@@ -232,11 +240,15 @@ class Sim:
         self.wz += max(-.06, min(.06, wz_cmd - self.wz))
         if self.sit:
             self._sat = True
+            self._unfold = False
         elif self._sat:
             self.leave_sit()
-        if self.sit:
-            # disabled: no policy; joints held at the folded pose (action = offset from the default / scale)
-            act = np.array([(SIT_Q[n] - DEFAULT_Q[n]) / SCALE[n] if n in SIT_Q else 0. for n in ACTION_JOINTS], np.float32)
+            self._unfold = True       # the leg motors unfold Beni; the policy takes over once the legs are under it
+        # the policy takes over once the knees are back at the standing pose
+        if self._unfold and all(abs(d.qpos[self.jq[n]] - DEFAULT_Q[n]) < 0.40 for n in ("L2", "R2")):
+            self._unfold = False
+        if self._unfold:
+            act = np.zeros(len(ACTION_JOINTS), np.float32)
         else:
             act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw)[None], "h_in": self.h})
             act = act[0].astype(np.float32)
@@ -247,14 +259,13 @@ class Sim:
             self.delay.append(act)
             a = self.delay.pop(0)
             for i, n in enumerate(ACTION_JOINTS):
-                if self.sit and n in SIT_Q:
-                    # sit fold: the same motor model as walking (open-beni actuator gains, limits, knee spring),
-                    # targeting the folded pose
-                    damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
-                    d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)
-                    continue
-                if self.sit and n in ("LW", "RW"):
-                    d.ctrl[self.ja[n]] = 0.
+                # sit, stand-up and walking all drive the same motors (open-beni actuator model)
+                if (self.sit or self._unfold) and n in SIT_Q:
+                    # sit / stand-up: the leg motors are driven in rotation, turning at LEG_SPEED toward the pose
+                    goal = SIT_Q[n] if self.sit else DEFAULT_Q[n]
+                    w = max(-LEG_SPEED, min(LEG_SPEED, 10. * (goal - d.qpos[self.jq[n]])))
+                    lim = MOTOR[n].get("sim_lim", MOTOR[n]["lim"])
+                    d.ctrl[self.ja[n]] = max(-lim, min(lim, LEG_KV * (w - d.qvel[self.jv[n]])))
                     continue
                 damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
                 d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)

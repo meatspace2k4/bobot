@@ -173,11 +173,12 @@ class PostureSource:
 
     def start(self, sim):
         self.t = 0.
-        sim.sit = self.sit
+        self.fresh = not sim.sit and not getattr(sim, "_sat", False)
 
     def sticks(self, sim):
         self.t += STEP
-        sim.sit = self.sit
+        # the sit command reaches a standing Beni: after a reset the policy stands it for a second first
+        sim.sit = self.sit and (self.t > 1.0 or not self.fresh)
         return list(NEUTRAL)
 
     def done(self):
@@ -251,7 +252,7 @@ def show_boxes(m, geoms, on):
 
 
 # GLFW key codes; F1-F5 and most letters belong to MuJoCo's own viewer.
-KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F12 = 295, 296, 297, 298, 299, 301
+KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F12, KEY_X = 295, 296, 297, 298, 299, 301, 88
 
 
 class Overlay:
@@ -431,6 +432,15 @@ def run(a, ui):
             st["cur"] = (st["cur"] - 1) % n
         elif k == KEY_F7:
             st["cur"] = (st["cur"] + 1) % n
+        elif k == KEY_X:                 # X: sit / stand (MuJoCo's own X, texture toggle, is cancelled here)
+            v.opt.flags[mujoco.mjtVisFlag.mjVIS_TEXTURE] = 1
+            names = [c[0] for c in cols]
+            if cols[st["col"]][0] != "posture":
+                st["col"], st["cur"] = names.index("posture"), 0
+            else:
+                st["cur"] = 1 - st["cur"]
+            st["pending"] = True
+            return
         elif k == KEY_F10:
             st["toggle_head"] = True
             return
