@@ -23,7 +23,7 @@ Order matters: Beni serves one UCP peer at a time.
 1. Stand Beni with the remote. The phone must not be on Beni's Wi-Fi (Beni serves one peer).
 2. On the Pi, run `sudo bash /opt/beni/beni_start.sh`. It prints the tunnel URL. The bridge takes over the app's session.
 3. On the Mac, run `tools/mac/beni_lan.sh` (LAN path via SSH forward: p50 21 ms; preferred). From off-LAN, use `tools/mac/beni_pilot.py <url>` through the tunnel (p50 115 ms). Controls: left stick drives, right stick pans the head, Cross jumps (2nd press within 1.5 s = jump toward the stick), D-pad flips, touchpad e-stop.
-4. Stop with `curl <url>/stop`.
+4. Switching to the app: just close the pilot. The bridge releases Beni 3 s after the last pilot disconnects, and takes Beni back as soon as a pilot connects and the app isn't holding it (it took over within a second of the app closing). The bridge runs permanently and rejoins Beni's Wi-Fi after a power cycle. `curl <url>/stop` shuts it down for real.
 
 ## Live video only
 One-time setup:

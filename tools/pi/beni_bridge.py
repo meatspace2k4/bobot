@@ -62,8 +62,17 @@ class State:
         self.fps = 0.0
         self.subs = []
         self.ws_clients = 0
+        self.last_demand = 0.0
         self.stop = threading.Event()
         self.t0 = time.time()
+
+    def demand(self, grace=3.0):
+        """Hold Beni only while a pilot (control or video client) is connected, plus a short grace."""
+        with self.lock:
+            if self.ws_clients > 0 or self.subs:
+                self.last_demand = time.monotonic()
+                return True
+            return time.monotonic() - self.last_demand < grace
 
     def channels(self):
         with self.lock:
@@ -115,6 +124,7 @@ class State:
                 "last_action": self.last_action, "action_note": self.action_note, "actions": self.actions,
                 "ctl_age_ms": int((time.monotonic() - self.ctl_t) * 1000) if self.ctl_t else None,
                 "video_clients": len(self.subs), "ws_clients": self.ws_clients,
+                "holding_beni": self.ucp_up,
             }
 
 
@@ -209,6 +219,9 @@ def ucp_session(st, robot, bind):
             if now - last_rx > 5:
                 log("video stalled 5 s; resyncing")
                 return
+            if not st.demand():
+                log("no pilot connected; releasing Beni")
+                return
             time.sleep(0.002)
     finally:
         try:  # leave Beni at neutral
@@ -224,6 +237,9 @@ def ucp_session(st, robot, bind):
 
 def ucp_loop(st, robot, bind):
     while not st.stop.is_set():
+        if not st.demand():
+            time.sleep(0.5)  # idle: Beni stays free for the app
+            continue
         try:
             ucp_session(st, robot, bind)
         except OSError as e:
