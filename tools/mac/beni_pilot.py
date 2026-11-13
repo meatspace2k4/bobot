@@ -18,8 +18,7 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
   D-pad            direct flips: up = forward, down = back, left = left, right = right
-  Options          clear e-stop
-Keyboard: Space = e-stop, C = clear, Esc = quit.
+Keyboard: Esc = quit.
 Sticks are live while the controller is connected. Link loss (>300 ms) -> neutral on the bridge.
 
 Test without hardware: --headless --test-input "t=0.5,y=0,arm=1" --seconds 8
@@ -304,12 +303,6 @@ def main():
             elif e.type == pygame.KEYDOWN:
                 if e.key == pygame.K_ESCAPE:
                     sh.quit.set()
-                elif e.key == pygame.K_SPACE:
-                    with sh.lock:
-                        sh.ctl["estop"] = True
-                elif e.key == pygame.K_c:
-                    with sh.lock:
-                        sh.ctl["estop"], sh.ctl["clear"] = False, True
             elif e.type == pygame.JOYDEVICEADDED and js is None:
                 js = pygame.joystick.Joystick(e.device_index)
                 js.init()
@@ -319,9 +312,7 @@ def main():
                 last_btn = e.button
                 print(f"button {e.button}", flush=True)
                 with sh.lock:
-                    if e.button == B_OPTIONS:
-                        sh.ctl["estop"], sh.ctl["clear"] = False, True
-                    elif e.button == B_R3:
+                    if e.button == B_R3:
                         look.toggle()
                     elif e.button in DPAD_FLIPS:
                         sh.ctl["action"] = last_action = DPAD_FLIPS[e.button]
@@ -378,17 +369,17 @@ def main():
             screen.blit(pygame.image.frombuffer(frame, (W, H), "RGB"), (0, 0))
         else:
             screen.fill((20, 20, 20))
-        armed = ctl["arm"] and not st.get("estop")
+        armed = ctl["arm"]
         lines = [
             f"link {'UP' if sh.ws_up else 'DOWN'}  ucp {'up' if st.get('ucp') else 'down'}  "
             f"video {sh.vfps:4.1f} fps (beni {st.get('fps', 0)})  buf {buffered}  ctl age {st.get('ctl_age_ms')} ms",
-            f"{'E-STOP (Options to clear)' if st.get('estop') else ('LIVE' if armed else 'no controller')}"
+            f"{'LIVE' if armed else 'no controller'}"
             f"{'  BOOST' if ctl.get('boost') else ''}"
             f"   cap {ctl['cap']:.0%} (max {st.get('max_cap', 0):.0%})   ch {st.get('ch')}"
             f"   pad {'ok' if js else 'NONE'}  btn {last_btn}",
             f"last action {last_action}  bridge: {st.get('last_action')} ({st.get('action_note', '')})",
         ]
-        color = (255, 60, 60) if st.get("estop") else ((60, 220, 90) if armed else (230, 230, 230))
+        color = (60, 220, 90) if armed else (230, 230, 230)
         for i, s in enumerate(lines):
             surf = font.render(s, True, color if i == 1 else (230, 230, 230), (0, 0, 0))
             screen.blit(surf, (8, 8 + i * 20))
