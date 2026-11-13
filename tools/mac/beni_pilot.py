@@ -7,7 +7,8 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick Y     flip direction only (no throttle)
   left stick X     steer
   R2 / L2          throttle / reverse
-  right stick X    head pan (ch2), expo curve --head-expo (default 2.5)
+  right stick X    head pan (ch2); right stick Y: forward = look down, back = look up (ch3 low 6 bits)
+                   both with expo curve --head-expo (default 2.5)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
@@ -28,7 +29,7 @@ DEADZONE = 0.04  # only to kill stick drift at rest; values outside it pass thro
 # SDL2 joystick indices for DualSense
 B_CROSS, B_OPTIONS, B_UP, B_DOWN, B_LEFT, B_RIGHT, B_TOUCH = 0, 6, 11, 12, 13, 14, 15
 A_LX, A_LY, A_L2, A_R2 = 0, 1, 4, 5
-A_RX = 2
+A_RX, A_RY = 2, 3
 DPAD_FLIPS = {B_UP: "flip_forward", B_DOWN: "flip_back", B_LEFT: "flip_left", B_RIGHT: "flip_right"}
 # Rocket League dodge rules (RLUtilities src/mechanics/dodge.cc, src/simulation/car.cc)
 DODGE_TIMEOUT = 1.5      # s after first jump in which a dodge is allowed
@@ -236,7 +237,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), boost=False, cap=1.0, arm=True)
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), v=head_curve(raw(js.get_axis(A_RY)), args.head_expo), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)

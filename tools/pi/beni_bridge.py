@@ -22,6 +22,8 @@ ACTION_CODES = {"jump": 1, "flip_back": 4, "flip_left": 6, "flip_right": 8, "fli
 ACTIONS = {k: f"ch4 code {v}" for k, v in ACTION_CODES.items()}
 PULSE_S = 0.19
 CH4_REST = 32
+# Head tilt = low 6 bits of ch3 (rest 2015 -> 31). 0 = look down, 62 = look up (capture 2026-11-12 23:55 + video).
+TILT_CENTER, TILT_MAX = 31, 62
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 
@@ -29,9 +31,9 @@ def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
 
 
-def pack(ch0, ch1, code=0, ch2=1000):
-    v = int.from_bytes(TEMPLATE, "little") & ~((1 << 33) - 1) & ~(0x7FF << 44)
-    v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11) | ((ch2 & 0x7FF) << 22) | (((CH4_REST | (code << 6)) & 0x7FF) << 44)
+def pack(ch0, ch1, code=0, ch2=1000, tilt=TILT_CENTER):
+    v = int.from_bytes(TEMPLATE, "little") & ~((1 << 22) - 1) & ~(0x7FF << 22) & ~(0x3F << 33) & ~(0x7FF << 44)
+    v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11) | ((ch2 & 0x7FF) << 22) | ((tilt & 0x3F) << 33) | (((CH4_REST | (code << 6)) & 0x7FF) << 44)
     return v.to_bytes(9, "little")
 
 
@@ -52,6 +54,7 @@ class State:
         self.boost = False
         self.pulse_code, self.pulse_until = 0, 0.0
         self.head = 0.0  # right stick X -> ch2 = head pan (confirmed live 2026-11-12)
+        self.tilt = 0.0  # -1 = look down .. +1 = look up -> ch3 low 6 bits
         self.last_action, self.action_note, self.actions = None, '', 0
         self.ch = (1000, 1000)
         self.ucp_up = False
@@ -72,7 +75,9 @@ class State:
         code = self.pulse_code if (live and time.monotonic() < self.pulse_until) else 0
         h = self.head if live else 0.0
         c2 = 1000 + int(round(max(-1.0, min(1.0, h)) * 999))
-        return c0, c1, code, c2
+        tv = self.tilt if live else 0.0
+        tl = max(0, min(TILT_MAX, TILT_CENTER + int(round(max(-1.0, min(1.0, tv)) * TILT_CENTER))))
+        return c0, c1, code, c2, tl
 
     def apply(self, m):
         with self.lock:
@@ -81,6 +86,7 @@ class State:
             self.arm = bool(m.get("arm", False))
             self.boost = bool(m.get("boost", False))
             self.head = float(m.get("h", 0.0))
+            self.tilt = float(m.get("v", 0.0))
             a = m.get("action")
             if a:
                 self.last_action, self.actions = a, self.actions + 1
@@ -179,9 +185,9 @@ def ucp_session(st, robot, bind):
         while not st.stop.is_set():
             now = time.monotonic()
             if now >= nxt:
-                c0, c1, code, c2 = st.channels()
-                st.ch = (c0, c1, c2, CH4_REST | (code << 6))
-                body = pack(c0, c1, code, c2) + struct.pack("<H", ack) + b"\0" * 8
+                c0, c1, code, c2, tl = st.channels()
+                st.ch = (c0, c1, c2, tl, CH4_REST | (code << 6))
+                body = pack(c0, c1, code, c2, tl) + struct.pack("<H", ack) + b"\0" * 8
                 ts = int((now - t0) * 1e6) & 0xFFFFFFFF
                 s.send(struct.pack("<BBHHHI", 0x51, 0x10, ack, 0, 12 + len(body), ts) + body)
                 nxt += 0.02

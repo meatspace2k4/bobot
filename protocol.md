@@ -51,7 +51,7 @@ Order confirmed by the operator: jump, then back, left, right, forward.
 
 **Mid-air direction jump works** (confirmed live 2026-11-12): a flip code sent within 1.5 s of a jump code fires in the air. This gives Rocket League-style jump, then a jump toward the stick.
 
-**ch2 is head pan** (confirmed live 2026-11-12): it rests at 1000, and 1..1999 pans the head across its range. ch3 sits at 2015 and is still undecoded.
+**ch2 is head pan** (confirmed live 2026-11-12): it rests at 1000, and 1..1999 pans the head across its range. **Head tilt = low 6 bits of ch3** (capture 2026-11-12 23:55 plus decoded video): ch3 rests at 2015 (`0b11111_011111`, so tilt 31). 0 (ch3 = 1984) looks down and 62 (ch3 = 2046) looks up. The upper 5 bits stay constant. The app's head control is a 2D pad: X → ch2, Y → ch3 tilt.
 
 - The first jump drew a robot `device/status/rc/fsm_state` push (tag 0x5a) about 50 ms later.
 - No encrypted 0x0d message accompanied any action; only the periodic ping and timer were seen.
