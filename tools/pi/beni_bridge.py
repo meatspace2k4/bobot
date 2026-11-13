@@ -412,9 +412,17 @@ def main():
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     log(f"bridge on :{args.port}, robot {args.robot}, bind {args.bind}, max_cap {args.max_cap}, deadman {args.deadman}s")
+    had_client, t_start = False, time.monotonic()
     try:
         while not ST.stop.wait(0.5):
-            pass
+            if ST.ws_clients > 0 or ST.subs:
+                had_client = True
+            if had_client and not ST.demand():
+                log("pilot gone; bridge exiting")
+                ST.stop.set()
+            elif not had_client and time.monotonic() - t_start > 90:
+                log("no pilot connected within 90 s; bridge exiting")
+                ST.stop.set()
     except KeyboardInterrupt:
         ST.stop.set()
     time.sleep(0.5)
