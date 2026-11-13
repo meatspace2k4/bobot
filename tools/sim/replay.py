@@ -54,7 +54,7 @@ def main():
             if viewer:
                 viewer.action(code)
         last_ch4 = ch[4]
-        sim.step(n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, -n(ch[2]) * a.pan_max)
+        sim.step(n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, sim.head.step(-n(ch[2]), step))
         T.append(t); CH.append(ch); S.append(d.sensordata.copy()); QP.append(d.qpos.copy()); QV.append(d.qvel.copy())
         t += step
         if viewer:

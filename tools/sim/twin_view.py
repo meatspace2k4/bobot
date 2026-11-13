@@ -89,7 +89,7 @@ class TwinSource:
     # ---- source interface
     def start(self, sim):
         self.t = 0.0
-        sim.sit = False
+        sim.sit = True          # the real Beni is disabled (sitting) until it reports standing
         self.srv.reset()
         self.set_armed(self.drive)
         if self.kb:
@@ -116,8 +116,7 @@ class TwinSource:
         if st is None or age >= STALE:
             return list(NEUTRAL)
         sim.sit = st.get("posture") == "sit"
-        if not sim.sit:
-            self.remind(sim.d, st["pose"])
+        self.remind(sim.d, st["pose"])
         return list(st["ch"])
 
     def remind(self, d, pose):

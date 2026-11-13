@@ -515,7 +515,7 @@ def run(a, ui):
                         sim.jump()
                 last_ch4 = ch[4]
                 vx, wz = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max
-                sim.step(vx, wz, -n(ch[2]) * a.pan_max)
+                sim.step(vx, wz, sim.head.step(-n(ch[2]), STEP))
         if isinstance(src, TwinSource):
             src.draw(v, m, d)
         if overlay:

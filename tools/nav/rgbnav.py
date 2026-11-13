@@ -14,6 +14,10 @@ import cv2
 import numpy as np
 
 DW, DH = 308, 238
+# Focal length (px at DW) for camera rotation from optical flow, measured on the real head sweep: flow read 180 / 360 deg
+# where the head turned 150 / 270 deg (stops seen at 7:00 and 4:00) with f = 92.5 -> f ~ 117. The wide-angle lens is not
+# a pinhole: neither perception's 80 deg (f 183.5, reads 1.6x short) nor the 118 deg pinhole (f 92.5) is right.
+FLOW_F = 117.0
 BANDS = 48
 R_MAX = 3.0
 STICK_MAX = 0.6

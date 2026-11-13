@@ -15,7 +15,8 @@ import math, threading
 import cv2
 import numpy as np
 
-from rgbnav import BANDS, DW, R_MAX, STICK_MAX, FlowYaw, Perception, choose
+from beni_head import HeadModel
+from rgbnav import BANDS, DW, FLOW_F, R_MAX, STICK_MAX, FlowYaw, Perception, choose
 
 ORB = cv2.ORB_create(800)
 BF = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
@@ -65,9 +66,8 @@ class RgbBoxTour:
         self.per = Perception(hfov, cam_h)
         self.vmax, self.spin, self.merge, self.turn_max = vmax, spin, merge, turn_max
         self.sweep_s = 24.0
-        self.sitting = False        # Beni disabled (sitting): never drive; scan only after the head check
-        self.sweep_amp = 1.0        # head stick amplitude of the sweep (0.6 when sitting)
-        self.deg_per_unit = 168.0   # camera pan per unit head stick (head-sweep flow)
+        self.sitting = False        # Beni disabled (sitting): never drive, scan only
+        self.sweep_amp = 0.3        # head rate stick during the 360 sweep
         self.lock = threading.Lock()
         self.reset()
 
@@ -94,7 +94,7 @@ class RgbBoxTour:
 
     # ---- perception side (call from a worker thread)
     def observe(self, rgb):
-        dyaw = self.flow(rgb, self.per.f)
+        dyaw = self.flow(rgb, FLOW_F)
         P = self.per(rgb)
         g = cv2.cvtColor(cv2.resize(rgb, (DW, 238)), cv2.COLOR_RGB2GRAY)
         with self.lock:
@@ -140,43 +140,23 @@ class RgbBoxTour:
                 # head to centre and let it settle before anything moves it
                 self.head = 0.0
                 if self.t - self.t_phase > 1.5:
-                    self.phase, self.t_phase, self.turned, self.bursts = "wiggle", self.t, 0.0, []
-            elif self.phase == "wiggle":
-                # short bursts either side of centre; each must turn the camera by a fair share of what was
-                # commanded, else the head is mis-positioned (against a limit or the legs): no scan
-                W, B = (0.2, 0.9) if self.sitting else (0.08, 0.45)   # sitting: bigger, slower bursts
-                seq = (W, 0.0, -W, 0.0, W, 0.0)
-                k = int((self.t - self.t_phase) / B)
-                if k < len(seq):
-                    self.head = seq[k]
-                    if k != self._k:
-                        if self._k >= 0:
-                            self.bursts.append((self._cmd, math.degrees(self.turned - self.burst_y0)))
-                        self._k, self._cmd, self.burst_y0 = k, self.head, self.turned
-                else:
-                    self.head = 0.0
-                    moves = [(c, dy) for c, dy in self.bursts if c != 0.0]
-                    exp = W * self.deg_per_unit
-                    good = [abs(dy) > 0.5 * exp and (dy > 0) == (c > 0) for c, dy in moves]
-                    wrong = [abs(dy) > 0.5 * exp and (dy > 0) != (c > 0) for c, dy in moves]
-                    ok = sum(good) >= 2 and not any(wrong)      # one burst may land while the head is still settling
-                    if ok:
-                        self.phase, self.turned, self.t_survey = "survey", 0.0, self.t
-                    else:
-                        self.abort = "head check failed: " + ", ".join(f"{c:+.2f}->{dy:+.0f}deg" for c, dy in moves)
-                        self.phase = "done"
+                    self.phase, self.turned, self.t_survey, self.leg = "survey", 0.0, self.t, 0
+                    self.headm = HeadModel()     # head centred by the posture change
             elif self.phase == "survey":
-                # head sweep: centre -> full left -> full right -> centre, body held still
-                T, u = self.sweep_s, (self.t - self.t_survey) / self.sweep_s
-                A = self.sweep_amp
-                self.head = A * (-4 * u if u < 0.25 else (-1 + 4 * (u - 0.25) if u < 0.75 else 1 - 4 * (u - 0.75)))
-                self.head = max(-A, min(A, self.head))
-                # the camera must follow the command: a stalled head (limit, legs) ends the sweep at once
-                lag = abs(self.head * self.deg_per_unit - math.degrees(self.turned))
-                self.stall_t = self.stall_t + dt if lag > 60 else 0.0
-                if self.stall_t > 0.5:
-                    self.abort = f"sweep stopped: head {self.head:+.2f} but camera {math.degrees(self.turned):+.0f} deg"
-                    u = 1.0
+                # head sweep from centre, body held still: left to -180 deg, right to +180 deg, back to 0 (a full
+                # 360, then return). Each leg ends on the head model's angle (the same model the sim runs)
+                legs = ((-1, -180.0), (1, 180.0), (-1, 0.0))
+                pan = -math.degrees(self.headm.q)     # model + = left; here + = right
+                u = 0.0
+                if self.leg < len(legs):
+                    sgn, goal = legs[self.leg]
+                    if (pan - goal) * sgn >= 0:
+                        self.leg += 1
+                if self.leg < len(legs):
+                    self.head = legs[self.leg][0] * self.sweep_amp
+                else:
+                    self.head, u = 0.0, 1.0
+                self.headm.step(-self.head, dt)
                 if u >= 1.0:
                     self.head = 0.0
                     self.marks = []

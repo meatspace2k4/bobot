@@ -32,6 +32,9 @@ DEFAULT_Q = {"L1": 0.3, "R1": 0.3, "L2": 0.5, "R2": 0.5, "LW": 0.0, "RW": 0.0,
              "head_yaw_joint": 0.0}
 # Sitting (Beni's disabled state): legs fully folded, wheels up, no policy. Placed kinematically.
 POLICY_LIMITS = {"L1": (-2.679, 6.998), "R1": (-2.679, 6.998), "L2": (-0.908, 1.216), "R2": (-0.908, 1.216)}
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "nav"))
+from beni_head import HeadModel   # the real head: ch2 is a rate (shared with the real runners)
+
 SIT_Q = {"L1": -2.679 + 0.01, "R1": -2.679 + 0.01, "L2": 1.21, "R2": 1.21}  # hips at their lower limit (thighs up
 # and rotated forward over the top), knees folded; reached by the motors, not placed
 LEG_SPEED, LEG_KV = 2.0, 0.5  # sit / stand-up: leg motor speed (rad/s) and velocity gain (Nm s/rad)
@@ -191,7 +194,10 @@ class Sim:
         self.sit = False          # True: Beni's sitting / disabled state (no policy, legs folded)
         self._sat = False
         self._unfold = False
-        self.pol = ort.InferenceSession(str(pol), providers=["CPUExecutionProvider"])
+        self.head = HeadModel()   # ch2 -> head yaw target (rate)
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = so.inter_op_num_threads = 1   # a small net: worker threads only spin
+        self.pol = ort.InferenceSession(str(pol), so, providers=["CPUExecutionProvider"])
         self.reset()
 
     def reset(self):
@@ -238,6 +244,8 @@ class Sim:
             vx_cmd, wz_cmd = self.jump_hold, 0.
         self.vx += max(-.03, min(.03, vx_cmd - self.vx))
         self.wz += max(-.06, min(.06, wz_cmd - self.wz))
+        if self.sit != self._sat:
+            self.head.q = 0.0         # a posture change centres the head (real Beni)
         if self.sit:
             self._sat = True
             self._unfold = False
@@ -247,7 +255,8 @@ class Sim:
         # the policy takes over once the knees are back at the standing pose
         if self._unfold and all(abs(d.qpos[self.jq[n]] - DEFAULT_Q[n]) < 0.40 for n in ("L2", "R2")):
             self._unfold = False
-        if self._unfold:
+        if self.sit or self._unfold:
+            # sitting is Beni's disabled state: no policy (the legs are driven to the pose below)
             act = np.zeros(len(ACTION_JOINTS), np.float32)
         else:
             act, self.h = self.pol.run(None, {"obs": self.obs(gimbal_yaw)[None], "h_in": self.h})
@@ -266,6 +275,9 @@ class Sim:
                     w = max(-LEG_SPEED, min(LEG_SPEED, 10. * (goal - d.qpos[self.jq[n]])))
                     lim = MOTOR[n].get("sim_lim", MOTOR[n]["lim"])
                     d.ctrl[self.ja[n]] = max(-lim, min(lim, LEG_KV * (w - d.qvel[self.jv[n]])))
+                    continue
+                if self.sit and n in ("LW", "RW"):
+                    d.ctrl[self.ja[n]] = 0.         # disabled: wheels unpowered
                     continue
                 damp = KNEE_DAMPING if n in ("L2", "R2") else 1.
                 d.ctrl[self.ja[n]] = torque(n, d.qpos[self.jq[n]], d.qvel[self.jv[n]], a[i], damp)
@@ -443,7 +455,7 @@ def main():
         if stale:
             ch = [1000, 1000, 1000, 2015, 32, ch[5]]
         n = lambda v: max(-1., min(1., (v - 1000) / 999))
-        vx, wz, yaw = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, -n(ch[2]) * a.pan_max
+        vx, wz, yaw = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, sim.head.step(-n(ch[2]), period)
         code = (ch[4] >> 6) if ch[4] & 32 else 0
         if ch[4] != last_ch4 and code:
             name = ACTIONS.get(code, f"code{code}")

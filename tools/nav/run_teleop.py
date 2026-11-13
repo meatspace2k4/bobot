@@ -17,7 +17,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from beni_nav import BridgeLink
-from rgbnav import DH, DW, FlowYaw, Perception
+from rgbnav import DH, DW, FLOW_F, FlowYaw, Perception
 from twin import TwinPublisher
 
 ap = argparse.ArgumentParser()
@@ -57,12 +57,15 @@ def worker():
         rgb = link.frame(2)
         if rgb is None:
             continue
-        dyaw = flow(rgb, per.f)
-        P = per(rgb)
+        dyaw = flow(rgb, FLOW_F)
+        # the depth model feeds only the standing drift hold and the standing camera pitch / roll;
+        # sitting it is not run (the sim camera is level and there is no hold)
+        P = per(rgb) if a.standing else None
         with lock:
             S["yaw"] += dyaw
-            S["Z"] = centre_distance(P)
-            S["pitch"], S["roll"] = per.pitch, per.roll
+            if P is not None:
+                S["Z"] = centre_distance(P)
+                S["pitch"], S["roll"] = per.pitch, per.roll
         twin.frame(rgb)
 
 

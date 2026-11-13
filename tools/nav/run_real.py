@@ -34,7 +34,7 @@ a = ap.parse_args()
 tour = RgbBoxTour(a.hfov, a.cam_h, a.vmax, spin=a.spin, turn_max=a.turn_max)
 standing = a.standing or a.stand
 tour.sitting = not standing
-tour.sweep_amp = 1.0 if standing else 0.6
+tour.sweep_amp = 0.3   # head rate stick for the 360 sweep
 link = BridgeLink(a.url)
 twin = TwinPublisher()
 os.makedirs(os.path.join(HERE, "..", "..", "captures", "nav"), exist_ok=True)
@@ -141,7 +141,7 @@ try:
         # the sim gets the measured camera pitch (not the tilt command) in ch3's tilt bits
         sim_tilt = max(0, min(62, round(31 + tour.per.pitch / a.sim_tilt_max * 31)))
         twin.state([1000 + thr * 999, 1000 + yc * 999, 1000 + tour.head * 999, 1984 | sim_tilt, 32,
-                    562 if a.sit else 546],
+                    546 if standing else 562],
                    (tour.x, tour.y, tour.yaw), cam_pose(), tour.per.hfov, "stand" if standing else "sit")
         if int(now * 2) != int((now - 1 / 30) * 2):
             twin.marks(tour.order if tour.order else [m for m in tour.marks if m[3] >= 3])
