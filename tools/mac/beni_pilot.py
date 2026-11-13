@@ -8,7 +8,7 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick X     steer
   R2 / L2          throttle / reverse
   right stick X    head pan (ch2); right stick Y: forward = look down, back = look up (ch3 low 6 bits)
-                   both with expo curve --head-expo (default 2.5)
+                   both with expo curve --head-expo (default 4.0)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
@@ -156,7 +156,7 @@ def main():
     a = argparse.ArgumentParser()
     a.add_argument("url")
     a.add_argument("--cap", type=float, default=1.0)
-    a.add_argument("--head-expo", type=float, default=2.5, help="right-stick head pan curve (1 = linear)")
+    a.add_argument("--head-expo", type=float, default=4.0, help="right-stick head pan curve (1 = linear)")
     a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')
