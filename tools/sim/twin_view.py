@@ -188,8 +188,9 @@ class TwinSource:
 
             # sim head camera = real camera: measured pitch and roll (+ calibration offsets), in the head frame
             cam = st["cam"]
-            pitch = cam[4] + math.radians(cal["tilt_offset_deg"])
-            roll = (cam[5] if len(cam) > 5 else 0.0) + math.radians(cal["roll_offset_deg"])
+            # a bad floor fit (head swept onto a wall) must not throw the camera: clamp to the head's range
+            pitch = max(-0.8, min(0.8, cam[4] if math.isfinite(cam[4]) else 0.0)) + math.radians(cal["tilt_offset_deg"])
+            roll = max(-0.5, min(0.5, cam[5] if len(cam) > 5 and math.isfinite(cam[5]) else 0.0)) + math.radians(cal["roll_offset_deg"])
             f0 = np.array([math.cos(pitch), 0., math.sin(pitch)])
             r0, u0 = np.array([0., -1., 0.]), np.array([-math.sin(pitch), 0., math.cos(pitch)])
             r1 = r0 * math.cos(roll) - u0 * math.sin(roll)            # + roll: right side down
@@ -212,8 +213,8 @@ class TwinSource:
             tanv = tanh * self.tex_h / self.tex_w
             # plane distance: as far as PLANE_D but with the photo's bottom edge kept above the floor
             # (a plane through the floor hides the lower photo and nothing lines up)
-            down = math.atan(tanv) - pitch                    # angle of the bottom edge below horizontal
-            D = PLANE_D if down <= 0.02 else min(PLANE_D, 0.9 * P[2] / math.tan(down))
+            down = min(math.radians(80), math.atan(tanv) - pitch)   # bottom edge below horizontal (capped)
+            D = PLANE_D if down <= 0.02 else max(0.08, min(PLANE_D, 0.9 * P[2] / math.tan(down)))
             w, h = 2 * D * tanh, 2 * D * tanv
             C = P + D * f
             d.mocap_pos[self.cam_body] = C

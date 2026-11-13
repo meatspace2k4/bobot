@@ -51,7 +51,7 @@ class Floor:
             return False
         v0 = -b / a
         resid = np.abs(A @ [a, b] - med).mean() / max(1e-6, med.mean())
-        if not (-1.5 * DH < v0 < 0.7 * DH) or resid > 0.08:
+        if not (-0.3 * DH < v0 < 1.1 * DH) or resid > 0.08:   # about +-40 deg of pitch
             return False
         # horizon slope: fit d = a v + b u + c on the patch; the horizon d = 0 has dv/du = -b / a
         vv, uu = np.mgrid[r0:r1:3, c0:c1:3]

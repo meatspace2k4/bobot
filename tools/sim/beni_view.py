@@ -291,7 +291,7 @@ class Overlay:
         left = "\n".join([f"{cols[col][0]}  /  {src.name}", "", "throttle  ch0", "yaw       ch1", "head pan  ch2",
                           "head tilt ch3", "action    ch4", "mode      ch5", "", "cmd vx", "cmd wz", "", "speed",
                           "yaw rate", "heading", "height", "head yaw"])
-        right = "\n".join([src.status(), "", f"{ch[0]:4d}", f"{ch[1]:4d}", f"{ch[2]:4d}", f"{ch[3] & 0x3F:4d}",
+        right = "\n".join(["", "", f"{ch[0]:4d}", f"{ch[1]:4d}", f"{ch[2]:4d}", f"{ch[3] & 0x3F:4d}",
                            f"{ch[4]:4d}  {act}", f"{ch[5]:4d}", "", f"{vx:+.2f} m/s", f"{wz:+.2f} rad/s", "",
                            f"{spd:+.2f} m/s", f"{d.qvel[5]:+.2f} rad/s", f"{math.degrees(hdg):+5.0f} deg",
                            f"{d.qpos[2]:.3f} m", f"{math.degrees(d.qpos[sim.jq['head_yaw_joint']]):+5.0f} deg"])
@@ -304,6 +304,8 @@ class Overlay:
              "F8/F9 collection\nF6/F7 scene", "Tab / Shift+Tab panels"),
             (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_BOTTOMLEFT,
              f"collections   {tabs_c}\nscenes        {tabs_s}", ""),
+            # scene status on its own line, so a long status never widens the HUD table
+            (mujoco.mjtFontScale.mjFONTSCALE_100, mujoco.mjtGridPos.mjGRID_TOP, src.status(), ""),
         ])
         vp = v.viewport
         if vp is not None and vp.width > self.INSET_W + 24:
