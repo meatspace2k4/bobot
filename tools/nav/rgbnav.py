@@ -38,6 +38,7 @@ class Depth:
 class Floor:
     def __init__(self):
         self.k = self.v0 = None
+        self.roll = 0.0       # camera roll (rad, + = right side down), from the floor's horizon slope
 
     def fit(self, d):
         r0, r1 = int(DH * 0.72), int(DH * 0.97)
@@ -52,10 +53,16 @@ class Floor:
         resid = np.abs(A @ [a, b] - med).mean() / max(1e-6, med.mean())
         if not (-1.5 * DH < v0 < 0.7 * DH) or resid > 0.08:
             return False
+        # horizon slope: fit d = a v + b u + c on the patch; the horizon d = 0 has dv/du = -b / a
+        vv, uu = np.mgrid[r0:r1:3, c0:c1:3]
+        A3 = np.stack([vv.ravel(), uu.ravel(), np.ones(vv.size)], 1).astype(np.float64)
+        (a3, b3, _), *_ = np.linalg.lstsq(A3, d[r0:r1:3, c0:c1:3].ravel().astype(np.float64), rcond=None)
+        roll = math.atan2(b3, a3) if a3 > 0 else 0.0
         if self.k is None:
-            self.k, self.v0 = a, v0
+            self.k, self.v0, self.roll = a, v0, roll
         else:
             self.k, self.v0 = 0.8 * self.k + 0.2 * a, 0.8 * self.v0 + 0.2 * v0
+            self.roll = 0.8 * self.roll + 0.2 * roll
         return True
 
 
@@ -65,6 +72,7 @@ class Perception:
         self.floor = Floor()
         self.h = cam_h
         self.pitch = 0.0      # camera pitch (rad, + up), measured from the floor's horizon row
+        self.roll = 0.0       # camera roll (rad, + right side down), from the horizon slope
         self.set_hfov(hfov_deg)
 
     def set_hfov(self, hfov_deg):
@@ -82,6 +90,7 @@ class Perception:
             return out
         k, v0 = self.floor.k, self.floor.v0
         self.pitch = math.atan2(v0 - DH / 2, self.f)     # horizon above centre -> looking down
+        self.roll = self.floor.roll
         rho = np.clip(d, 0, None) / (k * self.h * self.f)
         rows = np.arange(DH)[:, None].astype(np.float32)
         floor_d = k * (rows - v0)

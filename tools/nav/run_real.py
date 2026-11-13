@@ -39,14 +39,14 @@ latest = {"rgb": None}
 def cam_pose():
     """Camera pose in the start frame: body pose + head pan (survey) at the camera height."""
     pan = tour.turned if tour.phase == "survey" else 0.0
-    return (tour.x, tour.y, a.cam_h, tour.yaw + pan if tour.phase != "survey" else pan, tour.per.pitch)
+    return (tour.x, tour.y, a.cam_h, tour.yaw + pan if tour.phase != "survey" else pan, tour.per.pitch, tour.per.roll)
 
 
 def map_points(rgb, P, cam, n=24):
     """Back-project a grid of depth pixels into the start frame (x fwd, y right, z up)."""
     if P is None or P["rho"] is None:
         return None
-    f, (cx, cy, cz, yaw, _) = tour.per.f, cam
+    f, (cx, cy, cz, yaw) = tour.per.f, cam[:4]
     us, vs = np.meshgrid(np.linspace(4, DW - 5, n), np.linspace(DH * 0.3, DH - 5, n * 3 // 4))
     us, vs = us.ravel().astype(int), vs.ravel().astype(int)
     rho = P["rho"][vs, us]

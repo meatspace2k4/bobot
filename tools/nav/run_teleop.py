@@ -39,7 +39,7 @@ twin = TwinPublisher()
 per = Perception(a.hfov, a.cam_h)
 flow = FlowYaw()
 lock = threading.Lock()
-S = {"yaw": 0.0, "x": 0.0, "y": 0.0, "Z": None, "pitch": 0.0}
+S = {"yaw": 0.0, "x": 0.0, "y": 0.0, "Z": None, "pitch": 0.0, "roll": 0.0}
 stop = threading.Event()
 
 
@@ -61,7 +61,7 @@ def worker():
         with lock:
             S["yaw"] += dyaw
             S["Z"] = centre_distance(P)
-            S["pitch"] = per.pitch
+            S["pitch"], S["roll"] = per.pitch, per.roll
         twin.frame(rgb)
 
 
@@ -86,7 +86,7 @@ try:
         now = time.monotonic()
         dt, last = now - last, now
         with lock:
-            yaw, Z, pitch = S["yaw"], S["Z"], S["pitch"]
+            yaw, Z, pitch, roll = S["yaw"], S["Z"], S["pitch"], S["roll"]
         ctl = twin.sim_ctl()
         thr = yc = head = 0.0
         if ctl:
@@ -126,7 +126,7 @@ try:
         S["y"] += thr * a.vmax * dt * math.sin(yaw)
         sim_tilt = max(0, min(62, round(31 + pitch / a.sim_tilt_max * 31)))
         twin.state([1000 + thr * 999, 1000 + yc * 999, 1000 + head * 999, 1984 | sim_tilt, last_ch4, 546],
-                   (S["x"], S["y"], yaw), (S["x"], S["y"], a.cam_h, yaw, pitch), per.hfov)
+                   (S["x"], S["y"], yaw), (S["x"], S["y"], a.cam_h, yaw, pitch, roll), per.hfov)
         time.sleep(1 / 30)
 except KeyboardInterrupt:
     pass

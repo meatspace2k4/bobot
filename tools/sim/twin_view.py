@@ -6,7 +6,8 @@
   path       the estimated trajectory
   marks      mapped objects as translucent boxes
   points     map points arrive in TwinServer.points (plumbed for mapping, not drawn yet)
-Everything here is world geometry (mocap bodies + viewer user scene); the debugger panels are untouched.
+Camera model as in mobileair's camera view: measured pitch/roll + offsets, hfov, lens k1 (division model),
+calibrated in tools/sim/twin_camera.json (hot-reloaded). World geometry only; no panels are changed.
 """
 import math, os, sys, time
 
@@ -21,6 +22,43 @@ PLANE_D = 0.6          # m in front of the camera
 STALE = 0.5            # s without state -> neutral sticks
 REMIND_TAU = 0.5       # s, pull of the sim Beni toward the RGB pose estimate
 MAX_POINTS = 3000
+CALIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "twin_camera.json")
+CALIB_DEFAULT = {"tilt_offset_deg": 0.0, "roll_offset_deg": 0.0, "hfov_deg": None, "k1": 0.0}
+
+
+def load_calib(cache={}):
+    """Camera calibration (the mobileair camera-view model: tilt, roll, hfov, lens k1), hot-reloaded on change.
+    tilt/roll offsets add to the measured (floor-horizon) pitch and roll; hfov None = the robot's value."""
+    try:
+        mt = os.path.getmtime(CALIB)
+    except OSError:
+        return dict(CALIB_DEFAULT)
+    if cache.get("mt") != mt:
+        import json
+        try:
+            cache["v"] = {**CALIB_DEFAULT, **json.load(open(CALIB))}
+            cache["mt"] = mt
+        except ValueError:
+            pass
+    return cache.get("v", dict(CALIB_DEFAULT))
+
+
+def lens_extent(k1):
+    """Pinhole half-extent of the photo's edge, in units of tan(hfov/2): division model q = d / (1 + k1 d^2)."""
+    return 1.0 / (1.0 + k1) if -0.33 < k1 < 0 else 1.0
+
+
+def undistort_maps(k1, w, h):
+    """cv2.remap maps from the pinhole plane (covering the photo's full width) to the photo (division model)."""
+    Q = lens_extent(k1)
+    half = w / 2.0
+    xs, ys = np.meshgrid(np.arange(w, dtype=np.float32), np.arange(h, dtype=np.float32))
+    qx, qy = (xs - w / 2 + 0.5) / half * Q, (ys - h / 2 + 0.5) / half * Q
+    rq = np.hypot(qx, qy)
+    rq = np.where(rq < 1e-9, 1e-9, rq)
+    disc = np.clip(1 - 4 * k1 * rq * rq, 0, None)
+    rd = (1 - np.sqrt(disc)) / (2 * k1 * rq)
+    return (w / 2 - 0.5 + qx / rq * rd * half).astype(np.float32), (h / 2 - 0.5 + qy / rq * rd * half).astype(np.float32)
 
 
 class TwinSource:
@@ -46,6 +84,7 @@ class TwinSource:
         self.cam = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, "head_cam")
         self.tex_w, self.tex_h = int(m.tex_width[self.tex]), int(m.tex_height[self.tex])
         self.t = 0.0
+        self.maps = None
 
     # ---- source interface
     def start(self, sim):
@@ -122,11 +161,17 @@ class TwinSource:
             self.srv.frame_new = False
             marks = list(self.srv.marks)
             path = list(self.srv.path)
+        cal = load_calib()
+        k1 = float(cal["k1"] or 0.0)
         if frame is not None:
-            img = np.ascontiguousarray(np.flipud(frame) if False else frame)
+            import cv2
+            img = np.ascontiguousarray(frame)
             if img.shape[:2] != (self.tex_h, self.tex_w):
-                import cv2
                 img = cv2.resize(img, (self.tex_w, self.tex_h))
+            if k1:
+                if self.maps is None or self.maps[0] != k1:
+                    self.maps = (k1, *undistort_maps(k1, self.tex_w, self.tex_h))
+                img = cv2.remap(img, self.maps[1], self.maps[2], cv2.INTER_LINEAR, borderValue=(0, 0, 0))
             adr, nc = m.tex_adr[self.tex], m.tex_nchannel[self.tex]
             if nc == 4:
                 img = np.concatenate([img, np.full(img.shape[:2] + (1,), 255, np.uint8)], axis=2)
@@ -141,13 +186,27 @@ class TwinSource:
             def to_sim(x, y):
                 return x, -y
 
-            # image plane on the sim Beni's head camera (follows body and head pan)
+            # sim head camera = real camera: measured pitch and roll (+ calibration offsets), in the head frame
+            cam = st["cam"]
+            pitch = cam[4] + math.radians(cal["tilt_offset_deg"])
+            roll = (cam[5] if len(cam) > 5 else 0.0) + math.radians(cal["roll_offset_deg"])
+            f0 = np.array([math.cos(pitch), 0., math.sin(pitch)])
+            r0, u0 = np.array([0., -1., 0.]), np.array([-math.sin(pitch), 0., math.cos(pitch)])
+            r1 = r0 * math.cos(roll) - u0 * math.sin(roll)            # + roll: right side down
+            u1 = r0 * math.sin(roll) + u0 * math.cos(roll)
+            qc = np.zeros(4)
+            mujoco.mju_mat2Quat(qc, np.stack([r1, u1, -f0], axis=1).flatten())
+            m.cam_quat[self.cam] = qc
+            hfov = cal["hfov_deg"] or st["hfov"]
+            m.cam_fovy[self.cam] = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) * self.tex_h / self.tex_w))
+            # image plane on the sim Beni's head camera (follows body, head pan, pitch, roll), as wide as the
+            # undistorted photo: tan(hfov/2) * lens_extent(k1)
             P = d.cam_xpos[self.cam].copy()
             R = d.cam_xmat[self.cam].reshape(3, 3)        # columns: right, up, back
             r, u, f = R[:, 0], R[:, 1], -R[:, 2]
             q = np.zeros(4)
             mujoco.mju_mat2Quat(q, R.flatten())
-            w = 2 * PLANE_D * math.tan(math.radians(st["hfov"]) / 2)
+            w = 2 * PLANE_D * math.tan(math.radians(hfov) / 2) * lens_extent(k1)
             h = w * self.tex_h / self.tex_w
             C = P + PLANE_D * f
             d.mocap_pos[self.cam_body] = C
