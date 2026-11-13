@@ -7,7 +7,7 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick Y     flip direction only (no throttle)
   left stick X     steer
   R2 / L2          throttle / reverse
-  right stick X    head pan (ch2, confirmed 2026-11-12)
+  right stick X    head pan (ch2), expo curve --head-expo (default 2.5)
   Cross            stick centered: jump.
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
@@ -56,6 +56,11 @@ def trig(v):
     """DualSense trigger axis rests at -1, full press +1 -> 0..1."""
     x = (v + 1.0) / 2.0
     return 0.0 if x < DEADZONE else min(1.0, x)
+
+
+def head_curve(v, expo):
+    """Head pan response: |v|^expo keeps full range at full deflection, finer near center."""
+    return (abs(v) ** expo) * (1 if v >= 0 else -1)
 
 
 def raw(v):
@@ -150,6 +155,7 @@ def main():
     a = argparse.ArgumentParser()
     a.add_argument("url")
     a.add_argument("--cap", type=float, default=1.0)
+    a.add_argument("--head-expo", type=float, default=2.5, help="right-stick head pan curve (1 = linear)")
     a.add_argument("--buffer-ms", type=float, default=100, help="video jitter buffer (latency vs smoothness)")
     a.add_argument("--headless", action="store_true")
     a.add_argument("--test-input", help='e.g. "t=0.5,y=0,arm=1" (overrides the controller)')
@@ -230,7 +236,7 @@ def main():
                 sh.ctl.update(t=test.get("t", 0.0), y=test.get("y", 0.0), arm=bool(test.get("arm", 0)))
             elif js:
                 t = trig(js.get_axis(A_R2)) - trig(js.get_axis(A_L2))  # throttle only from triggers (RL); LY = flip direction only
-                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=raw(js.get_axis(A_RX)), boost=False, cap=1.0, arm=True)
+                sh.ctl.update(t=t, y=raw(js.get_axis(A_LX)), h=head_curve(raw(js.get_axis(A_RX)), args.head_expo), boost=False, cap=1.0, arm=True)
             else:
                 sh.ctl.update(t=0.0, y=0.0, arm=False)  # no controller: never armed
             ctl = dict(sh.ctl)
