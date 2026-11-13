@@ -18,7 +18,6 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
                    direction held (|LX|+|LY| >= 0.5) + double tap within 0.3 s: direction jump only
                    (body frame, stick up = forward, snapped to Beni's 4 flips). One tap with direction held = jump.
   D-pad            direct flips: up = forward, down = back, left = left, right = right
-  Touchpad click   E-STOP (latched on the bridge)
   Options          clear e-stop
 Keyboard: Space = e-stop, C = clear, Esc = quit.
 Sticks are live while the controller is connected. Link loss (>300 ms) -> neutral on the bridge.
@@ -320,9 +319,7 @@ def main():
                 last_btn = e.button
                 print(f"button {e.button}", flush=True)
                 with sh.lock:
-                    if e.button == B_TOUCH:
-                        sh.ctl["estop"] = True
-                    elif e.button == B_OPTIONS:
+                    if e.button == B_OPTIONS:
                         sh.ctl["estop"], sh.ctl["clear"] = False, True
                     elif e.button == B_R3:
                         look.toggle()
