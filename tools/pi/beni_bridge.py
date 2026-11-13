@@ -14,7 +14,8 @@ The 50 Hz ack frame doubles as the stick frame: same packet, current channels pl
 import argparse, base64, hashlib, json, queue, socket, struct, threading, time
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
-TEMPLATE = bytes.fromhex("e8431ffabe0f021805")  # captured neutral body, ch5=545
+TEMPLATE = bytes.fromhex("e8431ffabe0f021805")  # captured neutral body, ch5=560 (the app's pre-drive value)
+CH5 = None  # --ch5 overrides ch5 (app drives with 545/546/547)
 VIDEO = (0x05, 0x07)
 # Actions are cleartext: a ~190 ms pulse on ch4 (rest 32) with a code in bits 6..9: ch4 = 32 | code << 6.
 # Mapped from the app capture 2026-11-12 22:54 (captures/beni-actions.pcap).
@@ -34,6 +35,8 @@ def log(*a):
 def pack(ch0, ch1, code=0, ch2=1000, tilt=TILT_CENTER):
     v = int.from_bytes(TEMPLATE, "little") & ~((1 << 22) - 1) & ~(0x7FF << 22) & ~(0x3F << 33) & ~(0x7FF << 44)
     v |= (ch0 & 0x7FF) | ((ch1 & 0x7FF) << 11) | ((ch2 & 0x7FF) << 22) | ((tilt & 0x3F) << 33) | (((CH4_REST | (code << 6)) & 0x7FF) << 44)
+    if CH5 is not None:
+        v = (v & ~(0x7FF << 55)) | ((CH5 & 0x7FF) << 55)
     return v.to_bytes(9, "little")
 
 
@@ -396,14 +399,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global ST
+    global ST, CH5
     a = argparse.ArgumentParser()
     a.add_argument("--robot", default="192.168.7.1:9007")
     a.add_argument("--bind", help="local IP on Beni's AP (wlan0)")
     a.add_argument("--port", type=int, default=8780)
     a.add_argument("--max-cap", type=float, default=1.0, help="hard ceiling on |stick| fraction (1.0 = full 1..1999)")
     a.add_argument("--deadman", type=float, default=0.3, help="seconds without ctl before neutral")
+    a.add_argument("--ch5", type=int, help="raw ch5 (default: template 560)")
     args = a.parse_args()
+    CH5 = args.ch5
     host, port = args.robot.rsplit(":", 1)
     ST = State(args.max_cap, args.deadman)
     threading.Thread(target=ucp_loop, args=(ST, (host, int(port)), args.bind), daemon=True).start()
@@ -411,7 +416,7 @@ def main():
     srv = ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     srv.daemon_threads = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    log(f"bridge on :{args.port}, robot {args.robot}, bind {args.bind}, max_cap {args.max_cap}, deadman {args.deadman}s")
+    log(f"bridge on :{args.port}, robot {args.robot}, bind {args.bind}, max_cap {args.max_cap}, deadman {args.deadman}s, ch5 {CH5 or 560}")
     had_client, t_start = False, time.monotonic()
     try:
         while not ST.stop.wait(0.5):

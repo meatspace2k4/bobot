@@ -10,7 +10,7 @@ the model and policy. Nothing from it is vendored here.
 Channel -> sim mapping (scales are bench parameters, NOT measured robot units):
   ch0 -> forward velocity command   (ch0-1000)/999 * --vx-max
   ch1 -> yaw-rate command           -(ch1-1000)/999 * --wz-max   (ch1=1 is left)
-  ch2 -> head yaw joint target     (ch2-1000)/999 * --pan-max (overrides the policy's head action)
+  ch2 -> head yaw joint target     -(ch2-1000)/999 * --pan-max (ch2 low = left) (overrides the policy's head action)
   ch3 low 6 bits -> camera pitch    (tilt-31)/31 * --tilt-max  (render only; no tilt joint in the model)
   ch4 code 1 -> jump; flip codes are logged only (the policy has no flips)
 
@@ -46,6 +46,9 @@ JUMP_FRAMES, JUMP_HEIGHT = 41, .18
 OFF_W, OFF_H = 1920, 1440
 KEEP_HEAD_ROLL = False
 ACTIONS = {1: "jump", 2: "flip_forward", 4: "flip_back", 6: "flip_left", 8: "flip_right"}
+
+
+TWIN_W, TWIN_H, TWIN_MARKS = 320, 240, 16
 
 
 def build_xml(root_dir: Path) -> str:
@@ -94,6 +97,18 @@ def build_xml(root_dir: Path) -> str:
     wb.insert(0, ET.Element("light", pos="0 0 4", dir="0 0 -1", directional="true"))
     for i, (x, y, s) in enumerate([(3, 1.5, .1), (4, -2, .15), (-2, 2, .1), (-3, -1.5, .12), (1, 4, .2)]):
         wb.insert(0, ET.Element("geom", name=f"block{i}", type="box", pos=f"{x} {y} {s}", size=f"{s} {s} {s}", rgba=".8 .4 .2 1"))
+    # Twin layer (tools/nav/twin.py -> beni_view live scene): the real camera image on a plane at the
+    # estimated camera pose, and mapped objects as boxes. Mocap, no collision, parked below the floor.
+    ET.SubElement(asset, "texture", name="twin_img", type="2d", builtin="flat", rgb1=".2 .2 .2",
+                  width=str(TWIN_W), height=str(TWIN_H))
+    ET.SubElement(asset, "material", name="twin_img", texture="twin_img", emission="1", rgba="1 1 1 1")
+    cam = ET.SubElement(wb, "body", name="twin_cam", mocap="true", pos="0 0 -5")
+    ET.SubElement(cam, "geom", name="twin_plane", type="box", size=".2 .15 .002", material="twin_img", group="3",
+                  contype="0", conaffinity="0")
+    for i in range(TWIN_MARKS):
+        mk = ET.SubElement(wb, "body", name=f"twin_mark{i}", mocap="true", pos="0 0 -5")
+        ET.SubElement(mk, "geom", name=f"twin_mark{i}", type="box", size=".1 .1 .1", rgba=".2 .8 1 .45",
+                      contype="0", conaffinity="0")
     from viewer_ui import dress_scene
     dress_scene(root)
     return ET.tostring(root, encoding="unicode")
@@ -311,7 +326,7 @@ def main():
     ap.add_argument("--port", type=int, default=19007)
     ap.add_argument("--vx-max", type=float, default=1.5, help="m/s at full stick")
     ap.add_argument("--wz-max", type=float, default=1.8, help="rad/s at full stick")
-    ap.add_argument("--pan-max", type=float, default=math.pi, help="head yaw rad at ch2=1999")
+    ap.add_argument("--pan-max", type=float, default=math.radians(168), help="head yaw rad at ch2=1 (left; ch2=1999 right), measured by head-sweep flow")
     ap.add_argument("--tilt-max", type=float, default=math.radians(45), help="camera pitch rad at tilt 62")
     ap.add_argument("--no-video", action="store_true")
     ap.add_argument("--encoder", choices=["vt", "x265"], default="vt")
@@ -343,7 +358,7 @@ def main():
         if stale:
             ch = [1000, 1000, 1000, 2015, 32, ch[5]]
         n = lambda v: max(-1., min(1., (v - 1000) / 999))
-        vx, wz, yaw = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, n(ch[2]) * a.pan_max
+        vx, wz, yaw = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, -n(ch[2]) * a.pan_max
         code = (ch[4] >> 6) if ch[4] & 32 else 0
         if ch[4] != last_ch4 and code:
             name = ACTIONS.get(code, f"code{code}")

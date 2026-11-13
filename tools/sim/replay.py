@@ -23,7 +23,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--vx-max", type=float, default=1.5, help="m/s at full stick")
     ap.add_argument("--wz-max", type=float, default=1.8, help="rad/s at full stick")
-    ap.add_argument("--pan-max", type=float, default=math.pi)
+    ap.add_argument("--pan-max", type=float, default=math.radians(168))
     ap.add_argument("--view", action="store_true", help="watch it in real time (run with mjpython on macOS)")
     a = ap.parse_args()
     rows = [(float(r["t"]), [int(r[f"ch{i}"]) for i in range(6)]) for r in csv.DictReader(open(a.sticks))]
@@ -54,7 +54,7 @@ def main():
             if viewer:
                 viewer.action(code)
         last_ch4 = ch[4]
-        sim.step(n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, n(ch[2]) * a.pan_max)
+        sim.step(n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max, -n(ch[2]) * a.pan_max)
         T.append(t); CH.append(ch); S.append(d.sensordata.copy()); QP.append(d.qpos.copy()); QV.append(d.qvel.copy())
         t += step
         if viewer:

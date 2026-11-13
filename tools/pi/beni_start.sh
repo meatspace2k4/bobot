@@ -9,6 +9,8 @@ if ! systemctl is-active --quiet beni-cf; then
 fi
 URL=$(journalctl -u beni-cf -n 200 --no-pager | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1)
 echo "URL: $URL"
-systemd-run --unit beni-bridge -p EnvironmentFile=/opt/beni/beni.env \
+# ch5 override from the pilot's ~/.beni_ch5 (written by tools/mac/beni_lan.sh from CH5=...); digits only.
+H=$(getent passwd "${SUDO_USER:-root}" | cut -d: -f6); CH5=$(tr -cd 0-9 < "$H/.beni_ch5" 2>/dev/null | head -c 4)
+systemd-run --unit beni-bridge -p EnvironmentFile=/opt/beni/beni.env ${CH5:+-E CH5=$CH5} \
   -p ExecStopPost="-/usr/bin/nmcli con delete ${BENI_SSID:-Beni-206391}" \
   /opt/beni/beni_session.sh && echo "BRIDGE STARTED - Pi Wi-Fi moves to Beni; control it via $URL/status and $URL/stop"

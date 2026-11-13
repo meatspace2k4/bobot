@@ -7,7 +7,8 @@ with replay scenes from captures and scripted sources, plus an optional UI overl
 
 Each capture's stick timeline (topic_trace.py *.sticks.csv) is a collection; each burst of stick
 activity is a scene. "Box tour" drives to each box in clockwise order through the same stick channels.
-Keys: F6/F7 scene, F8/F9 collection; everything else is MuJoCo's viewer (Tab panels, Space pause, ...).
+Keys: F6/F7 scene, F8/F9 collection, F10 camera follows head/body (keeps the view angle),
+F12 arm/disarm in the live scene (arrow keys then drive the real Beni through the sim); everything else is MuJoCo's viewer (Tab panels, Space pause, ...).
 
 usage: mjpython beni_view.py --open-beni PATH --traces DIR [--dev]
 """
@@ -18,6 +19,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from beni_sim import Sim, DT, DECIMATION
+from twin_view import TwinSource
 
 STEP = DT * DECIMATION
 NEUTRAL = [1000, 1000, 1000, 2015, 32, 546]
@@ -227,7 +229,7 @@ def show_boxes(m, geoms, on):
 
 
 # GLFW key codes; F1-F5 and most letters belong to MuJoCo's own viewer.
-KEY_F6, KEY_F7, KEY_F8, KEY_F9 = 295, 296, 297, 298
+KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F12 = 295, 296, 297, 298, 299, 301
 
 
 class Overlay:
@@ -282,8 +284,6 @@ class Overlay:
         spd = d.qvel[0] * math.cos(hdg) + d.qvel[1] * math.sin(hdg)
         self.speed.append(spd)
         self.yaw.append(d.qvel[5])
-        if v.cam.type == mujoco.mjtCamera.mjCAMERA_TRACKING:
-            v.cam.azimuth += 0.15 * ((math.degrees(hdg) - v.cam.azimuth + 180) % 360 - 180)
         sim.set_tilt(tilt_pitch)
         self.inset.update_scene(d, camera=sim.cam)
         img = self.inset.render().copy()
@@ -324,11 +324,28 @@ class FollowCamera:
     Align (MuJoCo resets to a free camera at the model center) brings back the default follow;
     choosing Free from the camera list keeps a free camera."""
 
-    def __init__(self, v, m, base, d, distance=1.1, elevation=-18.):
+    def __init__(self, v, m, base, d, distance=1.1, elevation=-18., head_q=None):
         self.v, self.m, self.base = v, m, base
         self.distance, self.elevation = distance, elevation
-        self.h = math.degrees(heading(d))
+        self.head_q = head_q          # qpos index of the head yaw joint
+        self.head = False             # follow the head (body heading + head yaw) instead of the body
+        self.h = self.ref(d)
         self.reset()
+
+    def ref(self, d):
+        h = math.degrees(heading(d))
+        if self.head and self.head_q is not None:
+            h += math.degrees(d.qpos[self.head_q])
+        return h
+
+    def toggle_head(self, d):
+        """Switch body/head following without moving the view: the offset absorbs the reference change."""
+        old = self.h
+        self.head = not self.head
+        new = self.ref(d)
+        self.h = old + ((new - old + 180) % 360 - 180)
+        self.offset -= self.h - old
+        return self.head
 
     def reset(self):
         c = self.v.cam
@@ -340,7 +357,7 @@ class FollowCamera:
 
     def update(self, d):
         c = self.v.cam
-        h = math.degrees(heading(d))
+        h = self.ref(d)
         self.h += (h - self.h + 180) % 360 - 180  # unwrapped: a spin never flips direction
         if c.type == mujoco.mjtCamera.mjCAMERA_FREE and np.allclose(c.lookat, self.m.stat.center):
             self.reset()  # Align
@@ -359,8 +376,9 @@ def run(a, ui):
     sim = Sim(a)
     m, d = sim.m, sim.d
     boxes, box_geoms = find_boxes(m)
-    cols = [("manual", [KeyboardSource()])] + capture_collections(a.traces) + [("scripted", [BoxTour(boxes)])]
-    st = dict(col=0, cur=0, pending=True)
+    cols = [("manual", [KeyboardSource()])] + capture_collections(a.traces) + [("scripted", [BoxTour(boxes)]),
+                                                                                ("live", [TwinSource(m, STEP, KeyboardSource())])]
+    st = dict(col=next((i for i, c in enumerate(cols) if c[0] == a.start), 0), cur=0, pending=True, toggle_head=False, toggle_arm=False)
     overlay = Overlay(sim) if ui else None
 
     def key(k):
@@ -369,6 +387,12 @@ def run(a, ui):
             st["cur"] = (st["cur"] - 1) % n
         elif k == KEY_F7:
             st["cur"] = (st["cur"] + 1) % n
+        elif k == KEY_F10:
+            st["toggle_head"] = True
+            return
+        elif k == KEY_F12:
+            st["toggle_arm"] = True
+            return
         elif k in (KEY_F8, KEY_F9):
             st["col"] = (st["col"] + (1 if k == KEY_F9 else -1)) % len(cols)
             st["cur"] = 0
@@ -378,18 +402,27 @@ def run(a, ui):
 
     v = mjviewer.launch_passive(m, d, key_callback=key, show_left_ui=not ui, show_right_ui=not ui)
     base = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, "base_link")
-    if ui:
-        v.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING
-        v.cam.trackbodyid = base
-        v.cam.distance, v.cam.elevation = 1.2, -20
-    else:
-        follow = FollowCamera(v, m, base, d)
-    print("F6/F7 scene, F8/F9 collection", flush=True)
+    v.opt.geomgroup[3] = 1  # twin image plane: shown in the main view, hidden from the head-camera inset
+    # Both views: follow camera; the mouse orbit is kept as an offset on top of Beni's heading.
+    follow = FollowCamera(v, m, base, d, distance=1.2 if ui else 1.1, elevation=-20. if ui else -18.,
+                          head_q=sim.jq.get("head_yaw_joint"))
+    print("F6/F7 scene, F8/F9 collection, F10 camera follows head/body, F12 arm/disarm (live scene)", flush=True)
     n = lambda x: max(-1., min(1., (x - 1000) / 999))
     last_ch4, src, ch, vx, wz = 32, None, list(NEUTRAL), 0., 0.
     acc, last, label_next = 0., time.monotonic(), 0.
     while v.is_running():
         now = time.monotonic()
+        if st["toggle_head"]:
+            st["toggle_head"] = False
+            with v.lock():
+                on = follow.toggle_head(d)
+            print(f"camera follows the {'head' if on else 'body'}", flush=True)
+        if st["toggle_arm"]:
+            st["toggle_arm"] = False
+            if isinstance(src, TwinSource):
+                with v.lock():
+                    on = src.set_armed(not src.armed)
+                print("ARMED: arrow keys drive the real Beni" if on else "disarmed", flush=True)
         acc = min(acc + now - last, 0.1)  # real time; drop backlog beyond 100 ms
         last = now
         if st["pending"]:
@@ -398,11 +431,14 @@ def run(a, ui):
                 sim.reset()
                 src = cols[st["col"]][1][st["cur"]]
                 show_boxes(m, box_geoms, isinstance(src, BoxTour))
+                TwinSource.hide(m, d)
+                v.user_scn.ngeom = 0
                 src.start(sim)
             last_ch4, acc = 32, 0.
             if overlay:
                 overlay.reset()
-                overlay.chase(v, base)
+                follow.h = follow.ref(d)
+                follow.reset()
             print(f"{cols[st['col']][0]} / {src.name}", flush=True)
         with v.lock():
             while acc >= STEP:
@@ -422,8 +458,12 @@ def run(a, ui):
                         sim.jump()
                 last_ch4 = ch[4]
                 vx, wz = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max
-                sim.step(vx, wz, n(ch[2]) * a.pan_max)
+                sim.step(vx, wz, -n(ch[2]) * a.pan_max)
+        if isinstance(src, TwinSource):
+            src.draw(v, m, d)
         if overlay:
+            with v.lock():
+                follow.update(d)
             overlay.draw(v, cols, st["col"], st["cur"], src, ch, vx, wz, (((ch[3] & 0x3F) - 31) / 31) * a.tilt_max)
         else:
             # Stock view: follow camera; corner label names collection, scene and time.
@@ -444,9 +484,10 @@ def main():
     ap.add_argument("--traces", required=True, help="directory of topic_trace.py *.sticks.csv")
     ap.add_argument("--vx-max", type=float, default=1.5, help="m/s at full stick")
     ap.add_argument("--wz-max", type=float, default=1.8, help="rad/s at full stick")
-    ap.add_argument("--pan-max", type=float, default=math.pi)
+    ap.add_argument("--pan-max", type=float, default=math.radians(168), help="head yaw rad at ch2 = 1 (left); measured by head-sweep flow")
     ap.add_argument("--tilt-max", type=float, default=math.radians(45))
     ap.add_argument("--dev", action="store_true", help="debugger view: dashboard with the overlay")
+    ap.add_argument("--start", default="manual", help="collection to open on (manual, live, scripted, ...)")
     a = ap.parse_args()
     run(a, ui=a.dev)
 

@@ -18,7 +18,7 @@ join(){
 }
 until join; do echo "Beni not reachable; retrying in 10 s"; sleep 10; done
 while :; do
-  python3 -I /opt/beni/beni_bridge.py --bind "$BIP" --max-cap "${MAX_CAP:-1.0}" &
+  python3 -I /opt/beni/beni_bridge.py --bind "$BIP" --max-cap "${MAX_CAP:-1.0}" ${CH5:+--ch5 "$CH5"} &
   PID=$!; lost=0
   while kill -0 $PID 2>/dev/null; do
     sleep 5
