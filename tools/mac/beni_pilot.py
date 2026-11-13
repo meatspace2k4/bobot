@@ -7,7 +7,7 @@ Controls (DualSense). Stick values are passed through raw and linear, full range
   left stick Y     throttle (forward/back)
   left stick X     steer
   R2 / L2          throttle / reverse, used only while the left stick Y is centered
-  right stick X    head pan (TEST: mapped to ch2, unconfirmed)
+  right stick X    head pan (ch2, confirmed 2026-11-12)
   Cross            Rocket League jump/dodge (constants from RLUtilities):
                      1st press = jump. 2nd press within 1.5 s: if |LX|+|LY| >= 0.5 -> dodge toward the stick
                      in Beni's body frame (stick up = front flip), snapped to Beni's 4 flips; else double jump (= jump).

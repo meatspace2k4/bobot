@@ -51,7 +51,7 @@ class State:
         self.ctl_t = 0.0
         self.boost = False
         self.pulse_code, self.pulse_until = 0, 0.0
-        self.head = 0.0  # right stick X -> ch2 (TEST: ch2 as head pan is unconfirmed)
+        self.head = 0.0  # right stick X -> ch2 = head pan (confirmed live 2026-11-12)
         self.last_action, self.action_note, self.actions = None, '', 0
         self.ch = (1000, 1000)
         self.ucp_up = False
