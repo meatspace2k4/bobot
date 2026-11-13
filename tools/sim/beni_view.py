@@ -463,7 +463,7 @@ def run(a, ui):
         v.cam.type, v.cam.fixedcamid = mujoco.mjtCamera.mjCAMERA_FIXED, mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, a.camera)
     print("F6/F7 scene, F8/F9 collection, F10 camera body/head/head-cam, live scene: F7 drive / F6 watch", flush=True)
     n = lambda x: max(-1., min(1., (x - 1000) / 999))
-    last_ch4, src, ch, vx, wz = 32, None, list(NEUTRAL), 0., 0.
+    last_ch4, last_ch5, src, ch, vx, wz = 32, None, None, list(NEUTRAL), 0., 0.
     acc, last, label_next = 0., time.monotonic(), 0.
     while v.is_running():
         now = time.monotonic()
@@ -514,6 +514,9 @@ def run(a, ui):
                     if code == 1:
                         sim.jump()
                 last_ch4 = ch[4]
+                if len(ch) > 5 and ch[5] != last_ch5 and ch[5] in (554, 816):
+                    sim.head.q = 0.0      # the real robot's posture command (sit 554 / stand 816) centres its head
+                last_ch5 = ch[5] if len(ch) > 5 else last_ch5
                 vx, wz = n(ch[0]) * a.vx_max, -n(ch[1]) * a.wz_max
                 sim.step(vx, wz, sim.head.step(-n(ch[2]), STEP))
         if isinstance(src, TwinSource):

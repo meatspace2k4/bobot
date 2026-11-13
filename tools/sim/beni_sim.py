@@ -200,13 +200,18 @@ class Sim:
         self.pol = ort.InferenceSession(str(pol), so, providers=["CPUExecutionProvider"])
         self.reset()
 
-    def reset(self):
+    def reset(self, sitting=False):
+        """Start state. sitting=True starts Beni already sitting (legs folded, body on its base), for a real Beni
+        that is sitting when the sim starts: no sit is run."""
         m, d = self.m, self.d
         mujoco.mj_resetData(m, d)
-        d.qpos[0:3] = (0, 0, .14)
+        d.qpos[0:3] = (0, 0, .048 if sitting else .14)
         d.qpos[3:7] = (1, 0, 0, 0)
         for n, v in DEFAULT_Q.items():
-            d.qpos[self.jq[n]] = v
+            d.qpos[self.jq[n]] = SIT_Q.get(n, v) if sitting else v
+        self.sit = self._sat = sitting
+        self._unfold = False
+        self.head.q = 0.0
         self.h = np.zeros((1, 1, 512), np.float32)
         self.last = np.zeros(7, np.float32)
         self.delay = [np.zeros(7, np.float32) for _ in range(DELAY_SUBSTEPS)]
@@ -244,8 +249,6 @@ class Sim:
             vx_cmd, wz_cmd = self.jump_hold, 0.
         self.vx += max(-.03, min(.03, vx_cmd - self.vx))
         self.wz += max(-.06, min(.06, wz_cmd - self.wz))
-        if self.sit != self._sat:
-            self.head.q = 0.0         # a posture change centres the head (real Beni)
         if self.sit:
             self._sat = True
             self._unfold = False
@@ -299,27 +302,6 @@ class Sim:
         if not np.all(np.isfinite(d.qpos)) or d.qpos[2] < -1:
             print("sim diverged; reset", flush=True)
             self.reset()
-
-    @staticmethod
-    def _level(d):
-        """Sitting Beni rests perfectly level: keep heading, zero pitch/roll and their rates (height is free)."""
-        w, x, y, z = d.qpos[3:7]
-        h = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
-        d.qpos[3:7] = (math.cos(h / 2), 0., 0., math.sin(h / 2))
-        d.qvel[3:5] = 0.
-        d.qvel[0:2] = 0.
-
-    def enter_sit(self):
-        """Straight into the parked sitting pose: body level on its base, legs folded at the limits, wheels up;
-        position and heading kept. (Folding it dynamically tips the body over.)"""
-        d = self.d
-        self._level(d)
-        d.qpos[2] = 0.05
-        d.qvel[:] = 0.
-        for n, v in SIT_Q.items():
-            d.qpos[self.jq[n]] = v
-        mujoco.mj_forward(self.m, d)
-        self._sat = True
 
     def leave_sit(self):
         """Hand back to the policy where Beni is: it stands up from the folded pose with its own motors

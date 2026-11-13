@@ -2,7 +2,6 @@
 
   sticks     the real robot's channels drive the sim Beni (policy animates the same commands)
   image      the real camera frame on a plane in front of the sim Beni's head camera, with its frustum
-  pose       the sim Beni is pulled toward the RGB pose estimate (drift reminder, tau 0.5 s)
   path       the estimated trajectory
   marks      mapped objects as translucent boxes
   points     map points arrive in TwinServer.points (plumbed for mapping, not drawn yet)
@@ -20,7 +19,6 @@ from twin import TwinServer
 NEUTRAL = [1000, 1000, 1000, 2015, 32, 546]
 PLANE_D = 0.25         # m in front of the camera (the frame is 2 D tan(hfov/2) wide: ~0.42 m)
 STALE = 0.5            # s without state -> neutral sticks
-REMIND_TAU = 0.5       # s, pull of the sim Beni toward the RGB pose estimate
 MAX_POINTS = 3000
 CALIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "twin_camera.json")
 CALIB_DEFAULT = {"tilt_offset_deg": 0.0, "roll_offset_deg": 0.0, "hfov_deg": None, "k1": 0.0}
@@ -89,7 +87,7 @@ class TwinSource:
     # ---- source interface
     def start(self, sim):
         self.t = 0.0
-        sim.sit = True          # the real Beni is disabled (sitting) until it reports standing
+        sim.reset(sitting=True)  # the real Beni is sitting (disabled) when the twin starts: the sim starts sitting
         self.srv.reset()
         self.set_armed(self.drive)
         if self.kb:
@@ -110,28 +108,11 @@ class TwinSource:
             if self.t >= self.next_ctl:          # ~30 Hz to the robot; it goes neutral 0.3 s after the last one
                 self.next_ctl = self.t + 1 / 30
                 self.srv.send({"type": "ctl", "armed": True, "ch": ch})
-            if st is not None and age < STALE:
-                self.remind(sim.d, st["pose"])
             return ch
         if st is None or age >= STALE:
             return list(NEUTRAL)
         sim.sit = st.get("posture") == "sit"
-        self.remind(sim.d, st["pose"])
         return list(st["ch"])
-
-    def remind(self, d, pose):
-        """Pull the sim Beni toward the RGB-estimated real pose (sim drift correction), tau = REMIND_TAU."""
-        a = 1 - math.exp(-self.step / REMIND_TAU)
-        tx, ty, tyaw = pose[0], -pose[1], -pose[2]          # runner -> sim axes
-        d.qpos[0] += a * (tx - d.qpos[0])
-        d.qpos[1] += a * (ty - d.qpos[1])
-        w, x, y, z = d.qpos[3:7]
-        h = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
-        dth = a * ((tyaw - h + math.pi) % (2 * math.pi) - math.pi)
-        qz = np.array([math.cos(dth / 2), 0, 0, math.sin(dth / 2)])
-        q = np.zeros(4)
-        mujoco.mju_mulQuat(q, qz, d.qpos[3:7].copy())
-        d.qpos[3:7] = q
 
     def done(self):
         return False
@@ -185,7 +166,7 @@ class TwinSource:
             scn.ngeom = 0
             if st is None:
                 return
-            # the sim Beni is held on the RGB pose estimate (remind), so the estimate frame is the sim frame
+            # the RGB estimate frame drawn in the sim frame
             def to_sim(x, y):
                 return x, -y
 
