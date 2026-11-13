@@ -1,0 +1,8 @@
+[Unit]
+Description=Restore home Wi-Fi on wlan0 when no Beni relay is running
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/opt/beni/beni.env
+ExecStart=/opt/beni/wifi_watchdog.sh

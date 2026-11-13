@@ -11,8 +11,21 @@ Protocol notes are in [protocol.md](protocol.md), and the topic ID table is in [
 | `tools/beni_drive.py` | Capped stick-frame client (11-bit RC channels) |
 | `tools/pi/` | Live video relay: Pi joins Beni and serves the stream over a cloudflared quick tunnel |
 | `tools/mac/beni_play.sh` | ffplay retry loop for the tunnel URL |
+| `tools/mac/beni_pilot.py` | Video + DualSense control window (WebSocket to the bridge) |
+| `tools/sim/fake_beni.py` | Fake Beni for bench-testing bridge + pilot |
 
-## Live video on the Mac
+## Control path to the Pi
+`ssh jpark@192.168.10.218`: the Asus WAN forwards port 22 to the Pi's eth0. This works wherever wlan0 is. Replies from 10.0.0.2 are pinned to eth0 by a source-routing rule (table 100) on "Wired connection 1".
+`beni-wifi-watchdog.timer` (60 s) brings wlan0 back to home Wi-Fi whenever no relay is running.
+
+## Fly Beni from the Mac
+Order matters: Beni only opens UDP 9007 while an app session exists.
+1. Open the Beni app, connect, and stand Beni.
+2. On the Pi, run `sudo bash /opt/beni/beni_start.sh`. It prints the tunnel URL. The bridge takes over the app's session.
+3. On the Mac, run `tools/mac/beni_pilot.py <url>`. Hold R1 to arm; Circle is the e-stop.
+4. Stop with `curl <url>/stop`.
+
+## Live video only
 One-time setup:
 ```bash
 tools/pi/install.sh jpark@aircheck-pi.local

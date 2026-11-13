@@ -1,8 +1,19 @@
 #!/bin/bash
 # From the Mac: tools/pi/install.sh jpark@aircheck-pi.local
-# Copies the relay to /opt/beni on the Pi. Create /opt/beni/beni.env from beni.env.example there (root-only, 600).
+# Installs to /opt/beni, prompts once for Beni's Wi-Fi password (stored root-only), deletes old /tmp copies.
 set -e
 HOST="${1:?usage: install.sh user@pi}"
 D="$(cd "$(dirname "$0")" && pwd)"
-scp "$D/beni_start.sh" "$D/beni_join_stream.sh" "$D/cf-empty.yml" "$D/beni.env.example" "$D/../beni_video.py" "$HOST:/tmp/"
-ssh -t "$HOST" 'sudo install -d /opt/beni && cd /tmp && sudo install -m 755 beni_start.sh beni_join_stream.sh /opt/beni/ && sudo install -m 644 cf-empty.yml beni_video.py beni.env.example /opt/beni/ && { [ -f /opt/beni/beni.env ] || echo "now create /opt/beni/beni.env (chmod 600)"; }'
+scp -q "$D/beni_start.sh" "$D/beni_session.sh" "$D/beni_bridge.py" "$D/cf-empty.yml" "$D/beni.env.example" "$HOST:/tmp/"
+ssh -t "$HOST" 'set -e
+sudo install -d -m 755 /opt/beni
+cd /tmp && sudo install -m 755 beni_start.sh beni_session.sh /opt/beni/ && sudo install -m 644 beni_bridge.py cf-empty.yml beni.env.example /opt/beni/
+if ! sudo test -f /opt/beni/beni.env; then
+  read -rsp "Beni Wi-Fi password: " PSK; echo
+  printf "BENI_SSID=Beni-206391\nBENI_PSK=%s\nHOME_SSID=Beeman\nMAX_CAP=0.5\n" "$PSK" | sudo install -m 600 /dev/stdin /opt/beni/beni.env
+  unset PSK
+fi
+rm -f /tmp/beni_start.sh /tmp/beni_session.sh /tmp/beni_bridge.py /tmp/cf-empty.yml /tmp/beni.env.example /tmp/beni_join_stream.sh /tmp/pi_tunnel_relay.sh /tmp/pi_relay.sh /tmp/beni_video.py /tmp/beni_url.txt
+sudo rm -f /tmp/pi_tunnel_relay.log /tmp/cf_quick.log /tmp/beni_tunnel_url.txt
+ls -l /opt/beni; sudo stat -c "%a %U %n" /opt/beni/beni.env
+echo INSTALL-OK'
