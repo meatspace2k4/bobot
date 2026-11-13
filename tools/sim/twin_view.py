@@ -45,7 +45,7 @@ def load_calib(cache={}):
 
 def lens_extent(k1):
     """Pinhole half-extent of the photo's edge, in units of tan(hfov/2): division model q = d / (1 + k1 d^2)."""
-    return 1.0 / (1.0 + k1) if -0.33 < k1 < 0 else 1.0
+    return 1.0 / (1.0 + k1) if -1.0 < k1 < 0 else 1.0
 
 
 def undistort_maps(k1, w, h):
@@ -198,7 +198,9 @@ class TwinSource:
             mujoco.mju_mat2Quat(qc, np.stack([r1, u1, -f0], axis=1).flatten())
             m.cam_quat[self.cam] = qc
             hfov = cal["hfov_deg"] or st["hfov"]
-            m.cam_fovy[self.cam] = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) * self.tex_h / self.tex_w))
+            # the sim camera sees what the undistorted photo covers (pinhole, widened by the lens extent)
+            m.cam_fovy[self.cam] = math.degrees(2 * math.atan(math.tan(math.radians(hfov) / 2) * lens_extent(k1)
+                                                              * self.tex_h / self.tex_w))
             # image plane on the sim Beni's head camera (follows body, head pan, pitch, roll), as wide as the
             # undistorted photo: tan(hfov/2) * lens_extent(k1)
             P = d.cam_xpos[self.cam].copy()

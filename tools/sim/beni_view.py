@@ -6,7 +6,7 @@
 
 Each capture's stick timeline (topic_trace.py *.sticks.csv) is a collection; each burst of stick
 activity is a scene. "Box tour" drives to each box in clockwise order through the same stick channels.
-Keys: F6/F7 scene, F8/F9 collection, F10 camera follows head/body (keeps the view angle),
+Keys: F6/F7 scene, F8/F9 collection, F10 camera: body follow / head follow / through the head camera,
 in the live collection F6/F7 switch watch / drive (drive: arrow keys drive the real Beni through the sim); everything else is MuJoCo's viewer (Tab panels, Space pause, ...).
 
 usage: mjpython beni_view.py --open-beni PATH --traces DIR [--dev]
@@ -324,10 +324,11 @@ class FollowCamera:
     Align (MuJoCo resets to a free camera at the model center) brings back the default follow;
     choosing Free from the camera list keeps a free camera."""
 
-    def __init__(self, v, m, base, d, distance=1.1, elevation=-18., head_q=None):
+    def __init__(self, v, m, base, d, distance=1.1, elevation=-18., head_q=None, pov_cam=None):
         self.v, self.m, self.base = v, m, base
         self.distance, self.elevation = distance, elevation
         self.head_q = head_q          # qpos index of the head yaw joint
+        self.pov_cam = pov_cam        # camera id to look through (head_cam)
         self.head = False             # follow the head (body heading + head yaw) instead of the body
         self.h = self.ref(d)
         self.reset()
@@ -339,13 +340,23 @@ class FollowCamera:
         return h
 
     def toggle_head(self, d):
-        """Switch body/head following without moving the view: the offset absorbs the reference change."""
+        """Cycle body follow -> head follow -> through the head camera -> body follow. Switching body/head
+        keeps the view angle (the offset absorbs the reference change)."""
+        c = self.v.cam
+        if c.type == mujoco.mjtCamera.mjCAMERA_FIXED:          # pov -> body follow
+            self.head = False
+            self.h = self.ref(d)
+            self.reset()
+            return "body"
+        if self.head and self.pov_cam is not None:            # head follow -> pov
+            c.type, c.fixedcamid = mujoco.mjtCamera.mjCAMERA_FIXED, self.pov_cam
+            return "head camera"
         old = self.h
-        self.head = not self.head
+        self.head = True                                       # body -> head follow
         new = self.ref(d)
         self.h = old + ((new - old + 180) % 360 - 180)
         self.offset -= self.h - old
-        return self.head
+        return "head"
 
     def reset(self):
         c = self.v.cam
@@ -412,10 +423,10 @@ def run(a, ui):
     v.opt.geomgroup[3] = 1  # twin image plane: shown in the main view, hidden from the head-camera inset
     # Both views: follow camera; the mouse orbit is kept as an offset on top of Beni's heading.
     follow = FollowCamera(v, m, base, d, distance=1.2 if ui else 1.1, elevation=-20. if ui else -18.,
-                          head_q=sim.jq.get("head_yaw_joint"))
+                          head_q=sim.jq.get("head_yaw_joint"), pov_cam=sim.cam)
     if a.camera:
         v.cam.type, v.cam.fixedcamid = mujoco.mjtCamera.mjCAMERA_FIXED, mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_CAMERA, a.camera)
-    print("F6/F7 scene, F8/F9 collection, F10 camera follows head/body, live scene: F7 drive / F6 watch", flush=True)
+    print("F6/F7 scene, F8/F9 collection, F10 camera body/head/head-cam, live scene: F7 drive / F6 watch", flush=True)
     n = lambda x: max(-1., min(1., (x - 1000) / 999))
     last_ch4, src, ch, vx, wz = 32, None, list(NEUTRAL), 0., 0.
     acc, last, label_next = 0., time.monotonic(), 0.
@@ -425,7 +436,7 @@ def run(a, ui):
             st["toggle_head"] = False
             with v.lock():
                 on = follow.toggle_head(d)
-            print(f"camera follows the {'head' if on else 'body'}", flush=True)
+            print(f"camera: {on}", flush=True)
         if st["toggle_arm"]:
             st["toggle_arm"] = False
             if isinstance(src, TwinSource):

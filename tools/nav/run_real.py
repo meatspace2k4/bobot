@@ -15,7 +15,7 @@ from twin import TwinPublisher
 ap = argparse.ArgumentParser()
 ap.add_argument("url")
 ap.add_argument("--hfov", type=float, default=80)
-ap.add_argument("--cam-h", type=float, default=0.15)
+ap.add_argument("--cam-h", type=float, default=0.19, help="camera height (m); Beni is 21.8 cm tall standing")
 ap.add_argument("--vmax", type=float, default=1.0)
 ap.add_argument("--spin", type=float, default=0.15)
 ap.add_argument("--turn-max", type=float, default=0.3)
